@@ -2,8 +2,10 @@
 //
 // OpenRouter exposes an OpenAI-compatible /chat/completions endpoint (no Anthropic-
 // native /v1/messages), so we use the `openai` SDK with a custom baseURL. Swap the
-// model with OPENROUTER_MODEL (e.g. "anthropic/claude-3.5-sonnet", "openai/gpt-4o",
-// "google/gemini-2.0-flash-001"). Tool calling works across most of these.
+// model with OPENROUTER_MODEL. Use a slug that exists in your OpenRouter account —
+// check https://openrouter.ai/models (IDs change over time). Examples that support
+// tool calling: "anthropic/claude-opus-4.8", "anthropic/claude-opus-4.8-fast",
+// "openai/gpt-5.5", "google/gemini-3.5-flash".
 
 import OpenAI from "openai";
 
@@ -17,7 +19,7 @@ export const client = new OpenAI({
   },
 });
 
-export const MODEL = process.env.OPENROUTER_MODEL ?? "anthropic/claude-3.5-sonnet";
+export const MODEL = process.env.OPENROUTER_MODEL ?? "anthropic/claude-opus-4.8-fast";
 
 export type ChatMsg = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 export type ChatTool = OpenAI.Chat.Completions.ChatCompletionTool;
