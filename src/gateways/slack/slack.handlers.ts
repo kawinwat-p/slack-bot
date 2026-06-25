@@ -3,13 +3,13 @@
 // loop (interview service), and persists. Business logic lives in services/.
 
 import type { App } from "@slack/bolt";
-import { postApprovalCard, postParent, say } from "./slack.gateway.js";
+import { postParent, say } from "./slack.gateway.js";
 import { readChannelText, summarizeContext } from "../../services/context/context.service.js";
-import { allowedBlocksFor } from "../../services/catalog/catalog.js";
 import { runLoop, answerPending, type AgentDeps } from "../../services/interview/interview.service.js";
-import { buildIdea, isBlastRadius } from "../../services/build/build.service.js";
+import { buildIdea } from "../../services/build/build.service.js";
 import { loadState, saveState } from "../../repositories/state.repository.js";
 import { log } from "../../shared/logger.js";
+import { clampInput } from "../../shared/input.js";
 import type { ConvState } from "../../shared/types.js";
 
 export function registerHandlers(app: App): void {
@@ -20,7 +20,8 @@ export function registerHandlers(app: App): void {
     await ack();
     const channel = command.channel_id;
     const user = command.user_id;
-    log("command", { cmd: "/workflow-ideas", user, channel });
+    const userPrompt = clampInput(command.text);
+    log("command", { cmd: "/workflow-ideas", user, channel, prompt: userPrompt || null });
 
     const threadTs = await postParent(
       client,
@@ -30,8 +31,7 @@ export function registerHandlers(app: App): void {
     );
 
     const channelText = await readChannelText(client, channel);
-    const context = await summarizeContext(channelText);
-    const allowedBlocks = allowedBlocksFor(channelText);
+    const context = await summarizeContext(channelText, userPrompt);
 
     const state: ConvState = {
       threadTs,
@@ -39,7 +39,6 @@ export function registerHandlers(app: App): void {
       user,
       phase: "interview",
       context,
-      allowedBlocks,
       questionsAsked: 0,
       proposedIdeas: [],
       history: [
@@ -47,11 +46,13 @@ export function registerHandlers(app: App): void {
           role: "user",
           content:
             "Begin. Use the observed context to open with one sharp, grounded question " +
-            "(or propose ideas immediately if you already understand the pain).",
+            "(or propose ideas immediately if you already understand the pain)." +
+            (userPrompt ? ` The user added: "${userPrompt}".` : ""),
         },
       ],
     };
     saveState(state);
+    log("state.initial", { context: state.context, opening: state.history[0]?.content });
     await runLoop(deps(), state);
   });
 
@@ -61,8 +62,10 @@ export function registerHandlers(app: App): void {
     if (m.subtype || !m.thread_ts || m.bot_id) return;
     const state = loadState(m.thread_ts);
     if (!state || state.pending?.kind !== "ask_user") return;
+    const text = clampInput(m.text);
+    if (!text) return; // ignore empty/whitespace replies
     log("event.reply", { channel: m.channel });
-    answerPending(state, String(m.text ?? ""));
+    answerPending(state, text);
     saveState(state);
     await runLoop(deps(), state);
   });
@@ -98,43 +101,10 @@ export function registerHandlers(app: App): void {
     if (!state) return;
     const idea = state.proposedIdeas.find((i) => i.id === (action as any).value);
     if (!idea) return;
-    log("event.build", { idea: idea.title, blastRadius: isBlastRadius(idea) });
+    log("event.build", { idea: idea.title });
 
-    if (isBlastRadius(idea)) {
-      state.pending = { kind: "approval", ideaId: idea.id };
-      saveState(state);
-      await postApprovalCard(client, state.channel, threadTs, `set up "${idea.title}" — it will post into this channel on a schedule.`, idea.id);
-      return;
-    }
     const outcome = await buildIdea(client, state.channel, idea);
     await say(client, state.channel, threadTs, outcome.message);
-  });
-
-  app.action("approve_action", async ({ ack, body, action, client }) => {
-    await ack();
-    const b = body as any;
-    const threadTs: string = b.message?.thread_ts ?? b.container?.thread_ts;
-    const state = loadState(threadTs);
-    if (!state || state.pending?.kind !== "approval") return;
-    const idea = state.proposedIdeas.find((i) => i.id === (action as any).value);
-    state.pending = undefined;
-    saveState(state);
-    if (!idea) return;
-    log("event.approve", { idea: idea.title });
-    const outcome = await buildIdea(client, state.channel, idea);
-    await say(client, state.channel, threadTs, outcome.message);
-  });
-
-  app.action("cancel_action", async ({ ack, body, client }) => {
-    await ack();
-    const b = body as any;
-    const threadTs: string = b.message?.thread_ts ?? b.container?.thread_ts;
-    const state = loadState(threadTs);
-    if (state) {
-      state.pending = undefined;
-      saveState(state);
-    }
-    await say(client, b.channel?.id, threadTs, "Cancelled — nothing was changed.");
   });
 
   app.action("refine_idea", async ({ ack, body, client }) => {

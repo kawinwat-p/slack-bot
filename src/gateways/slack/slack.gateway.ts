@@ -4,17 +4,29 @@
 
 import type { WebClient } from "@slack/web-api";
 import type { Idea } from "../../shared/types.js";
+import { log } from "../../shared/logger.js";
 
-const HISTORY_LIMIT = 200;
+const PAGE = 1000; // Slack max per page
+const MAX_PAGES = 50; // ponytail: ~50k-message ceiling so a giant channel can't loop forever; bump if needed
 
 // ---- READ ----
 
+/** Pull the channel's full history (paginated, oldest -> newest). */
 export async function getRecentText(client: WebClient, channel: string): Promise<{ text: string; count: number }> {
-  const res = await client.conversations.history({ channel, limit: HISTORY_LIMIT });
-  const msgs = (res.messages ?? [])
-    .filter((m) => typeof m.text === "string" && m.text.length > 0)
-    .reverse(); // oldest -> newest
-  return { text: msgs.map((m) => m.text).join("\n"), count: msgs.length };
+  const texts: string[] = [];
+  let cursor: string | undefined;
+  let pages = 0;
+  do {
+    const res = await client.conversations.history({ channel, limit: PAGE, cursor });
+    for (const m of res.messages ?? []) {
+      if (typeof m.text === "string" && m.text.length > 0) texts.push(m.text);
+    }
+    cursor = res.response_metadata?.next_cursor || undefined;
+    pages++;
+  } while (cursor && pages < MAX_PAGES);
+  if (cursor) log("context.read.capped", { channel, pages: MAX_PAGES }); // hit the ceiling, older msgs skipped
+  texts.reverse(); // pages came newest-first; flip the whole list to oldest -> newest
+  return { text: texts.join("\n"), count: texts.length };
 }
 
 // ---- WRITE: plain ----
@@ -74,7 +86,7 @@ export async function postIdeaCard(
     `*Why you:* ${idea.triggeringEvidence}\n` +
     `*Trigger:* ${idea.trigger}\n` +
     `*Steps:* ${idea.steps.map((s) => `\n  • ${s}`).join("")}\n` +
-    `*Built with:* ${idea.blocks.join(", ")}  ·  *Effort:* ${idea.effort}`;
+    `*Effort:* ${idea.effort}`;
 
   await client.chat.postMessage({
     channel,
@@ -94,35 +106,7 @@ export async function postIdeaCard(
   });
 }
 
-export async function postApprovalCard(
-  client: WebClient,
-  channel: string,
-  threadTs: string,
-  summary: string,
-  token: string,
-): Promise<void> {
-  await client.chat.postMessage({
-    channel,
-    thread_ts: threadTs,
-    text: "Confirm action",
-    blocks: [
-      { type: "section", text: { type: "mrkdwn", text: `:warning: I'm about to: ${summary}` } },
-      {
-        type: "actions",
-        elements: [
-          { type: "button", style: "primary", text: { type: "plain_text", text: "Confirm" }, value: token, action_id: "approve_action" },
-          { type: "button", text: { type: "plain_text", text: "Cancel" }, value: token, action_id: "cancel_action" },
-        ],
-      },
-    ],
-  });
-}
-
 // ---- WRITE: real side effects (build) ----
-
-export async function scheduleMessage(client: WebClient, channel: string, postAt: number, text: string): Promise<void> {
-  await client.chat.scheduleMessage({ channel, post_at: postAt, text });
-}
 
 export async function createCanvas(client: WebClient, title: string, markdown: string): Promise<string> {
   const res = await client.canvases.create({ title, document_content: { type: "markdown", markdown } });

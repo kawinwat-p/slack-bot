@@ -10,7 +10,6 @@ import { postIdeaCard, postQuestion, say } from "../../gateways/slack/slack.gate
 import { saveState } from "../../repositories/state.repository.js";
 import { log, tid } from "../../shared/logger.js";
 import type { ChatMsg, ConvState } from "../../shared/types.js";
-import { CATALOG } from "../catalog/catalog.js";
 import { validateIdeas } from "../ideas/ideas.service.js";
 import { MAX_QUESTIONS, TOOLS, systemPrompt } from "./interview.prompts.js";
 
@@ -26,13 +25,12 @@ function toolResult(id: string, content: string): ChatMsg {
 
 export async function runLoop(deps: AgentDeps, state: ConvState): Promise<void> {
   const { client } = deps;
-  const allowed = CATALOG.filter((b) => state.allowedBlocks.includes(b.id));
   const T = tid(state.threadTs);
 
   for (let i = 0; i < MAX_ITERS; i++) {
     log("loop.iter", { thread: T, iter: i, asked: state.questionsAsked });
     const messages: ChatMsg[] = [
-      { role: "system", content: systemPrompt(state.context!, allowed, state.questionsAsked) },
+      { role: "system", content: systemPrompt(state.context!, state.questionsAsked) },
       ...state.history,
     ];
     const assistant = await chat(messages, TOOLS);
@@ -72,7 +70,7 @@ export async function runLoop(deps: AgentDeps, state: ConvState): Promise<void> 
     }
 
     if (primary.function.name === "propose_ideas") {
-      const { valid, rejected } = validateIdeas(args.ideas ?? [], state.allowedBlocks);
+      const { valid, rejected } = validateIdeas(args.ideas ?? []);
       log("propose.validate", { thread: T, valid: valid.length, rejected: rejected.length });
 
       if (valid.length === 0) {
@@ -82,7 +80,7 @@ export async function runLoop(deps: AgentDeps, state: ConvState): Promise<void> 
             primary.id,
             "None of those passed validation. Reasons: " +
               rejected.map((r) => r.reason).join("; ") +
-              ". Only use allowed blocks and cite non-empty triggeringEvidence.",
+              ". Include every required field, at least one step, and a non-empty triggeringEvidence.",
           ),
         );
         for (const id of otherIds) state.history.push(toolResult(id, "skipped"));

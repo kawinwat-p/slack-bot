@@ -1,10 +1,9 @@
-// Idea schema + deterministic validation. The LLM COMPOSES ideas; these rules
-// GUARANTEE feasibility. Every idea must (a) be built only from blocks allowed for the
-// team, and (b) cite a non-empty triggering evidence. Failures are dropped.
+// Idea schema + deterministic validation. The LLM COMPOSES ideas; these rules guarantee
+// the card is complete and grounded: every idea must have the required fields, at least
+// one step, and a non-empty triggering evidence. Failures are dropped.
 
 import { randomUUID } from "node:crypto";
-import { getBlock } from "../catalog/catalog.js";
-import type { BlockId, Idea } from "../../shared/types.js";
+import type { Idea } from "../../shared/types.js";
 
 export interface ValidationResult {
   valid: Idea[];
@@ -20,13 +19,11 @@ function coerce(raw: any): Partial<Idea> | null {
     triggeringEvidence: typeof raw.triggeringEvidence === "string" ? raw.triggeringEvidence : undefined,
     trigger: typeof raw.trigger === "string" ? raw.trigger : undefined,
     steps: Array.isArray(raw.steps) ? raw.steps.filter((s: unknown) => typeof s === "string") : [],
-    blocks: Array.isArray(raw.blocks) ? raw.blocks : [],
     effort: ["S", "M", "L"].includes(raw.effort) ? raw.effort : undefined,
   };
 }
 
-export function validateIdeas(rawIdeas: unknown[], allowedBlocks: BlockId[]): ValidationResult {
-  const allowed = new Set(allowedBlocks);
+export function validateIdeas(rawIdeas: unknown[]): ValidationResult {
   const valid: Idea[] = [];
   const rejected: { idea: Partial<Idea>; reason: string }[] = [];
 
@@ -48,17 +45,6 @@ export function validateIdeas(rawIdeas: unknown[], allowedBlocks: BlockId[]): Va
     }
     if (!idea.triggeringEvidence!.trim()) {
       rejected.push({ idea, reason: "empty triggeringEvidence" });
-      continue;
-    }
-
-    const blocks = idea.blocks as BlockId[];
-    if (!blocks.length) {
-      rejected.push({ idea, reason: "no blocks" });
-      continue;
-    }
-    const badBlock = blocks.find((b) => !getBlock(b) || !allowed.has(b));
-    if (badBlock) {
-      rejected.push({ idea, reason: `block not allowed for this team: ${badBlock}` });
       continue;
     }
 

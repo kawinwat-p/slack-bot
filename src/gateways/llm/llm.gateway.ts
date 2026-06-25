@@ -20,17 +20,21 @@ export const client = new OpenAI({
 
 export const MODEL = process.env.OPENROUTER_MODEL ?? "anthropic/claude-opus-4.8-fast";
 
-/** One round-trip to the model. Returns the assistant message verbatim. */
+/** One round-trip to the model. Returns the assistant message verbatim.
+ *  jsonMode forces a bare JSON object back (no prose/fences) — needs "json" in the prompt. */
 export async function chat(
   messages: ChatMsg[],
   tools?: ChatTool[],
+  jsonMode = false,
+  maxTokens = 1200,
 ): Promise<OpenAI.Chat.Completions.ChatCompletionMessage> {
   const t0 = Date.now();
   const res = await client.chat.completions.create({
     model: MODEL,
-    max_tokens: 1200,
+    max_tokens: maxTokens,
     messages,
     ...(tools ? { tools, tool_choice: "auto" } : {}),
+    ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
   });
   log("llm.call", { model: MODEL, ms: Date.now() - t0, tokens: res.usage?.total_tokens ?? null });
   return res.choices[0].message;
