@@ -1,28 +1,23 @@
-// Idea schema + deterministic validation (§5.2 / §5.3, Q7).
-//
-// The LLM COMPOSES ideas; these rules GUARANTEE feasibility. We never ask the LLM
-// "is this feasible?" — that just re-introduces hallucination. Instead every idea
-// must (a) be built only from blocks allowed for this team, and (b) cite a non-empty
-// triggering evidence. Anything failing is dropped before the user ever sees it.
+// Idea schema + deterministic validation. The LLM COMPOSES ideas; these rules
+// GUARANTEE feasibility. Every idea must (a) be built only from blocks allowed for the
+// team, and (b) cite a non-empty triggering evidence. Failures are dropped.
 
 import { randomUUID } from "node:crypto";
-import type { BlockId, Idea } from "./types.js";
-import { getBlock } from "./catalog.js";
+import { getBlock } from "../catalog/catalog.js";
+import type { BlockId, Idea } from "../../shared/types.js";
 
 export interface ValidationResult {
   valid: Idea[];
   rejected: { idea: Partial<Idea>; reason: string }[];
 }
 
-/** Coerce a raw LLM object into an Idea, or return null if structurally unusable. */
 function coerce(raw: any): Partial<Idea> | null {
   if (!raw || typeof raw !== "object") return null;
   return {
     id: randomUUID(),
     title: typeof raw.title === "string" ? raw.title : undefined,
     problem: typeof raw.problem === "string" ? raw.problem : undefined,
-    triggeringEvidence:
-      typeof raw.triggeringEvidence === "string" ? raw.triggeringEvidence : undefined,
+    triggeringEvidence: typeof raw.triggeringEvidence === "string" ? raw.triggeringEvidence : undefined,
     trigger: typeof raw.trigger === "string" ? raw.trigger : undefined,
     steps: Array.isArray(raw.steps) ? raw.steps.filter((s: unknown) => typeof s === "string") : [],
     blocks: Array.isArray(raw.blocks) ? raw.blocks : [],
@@ -42,10 +37,7 @@ export function validateIdeas(rawIdeas: unknown[], allowedBlocks: BlockId[]): Va
       continue;
     }
 
-    // Schema completeness.
-    const missing = (["title", "problem", "triggeringEvidence", "trigger", "effort"] as const).filter(
-      (k) => !idea[k],
-    );
+    const missing = (["title", "problem", "triggeringEvidence", "trigger", "effort"] as const).filter((k) => !idea[k]);
     if (missing.length) {
       rejected.push({ idea, reason: `missing fields: ${missing.join(", ")}` });
       continue;
@@ -54,14 +46,11 @@ export function validateIdeas(rawIdeas: unknown[], allowedBlocks: BlockId[]): Va
       rejected.push({ idea, reason: "no steps" });
       continue;
     }
-
-    // Required: non-empty evidence (§5.3).
     if (!idea.triggeringEvidence!.trim()) {
       rejected.push({ idea, reason: "empty triggeringEvidence" });
       continue;
     }
 
-    // Every block must be real AND allowed for this team (§5.1).
     const blocks = idea.blocks as BlockId[];
     if (!blocks.length) {
       rejected.push({ idea, reason: "no blocks" });

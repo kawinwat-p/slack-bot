@@ -1,19 +1,18 @@
-// LLM layer — OpenRouter via the OpenAI-compatible SDK.
+// LLM gateway — OpenRouter via the OpenAI-compatible SDK.
 //
 // OpenRouter exposes an OpenAI-compatible /chat/completions endpoint (no Anthropic-
-// native /v1/messages), so we use the `openai` SDK with a custom baseURL. Swap the
-// model with OPENROUTER_MODEL. Use a slug that exists in your OpenRouter account —
-// check https://openrouter.ai/models (IDs change over time). Examples that support
-// tool calling: "anthropic/claude-opus-4.8", "anthropic/claude-opus-4.8-fast",
-// "openai/gpt-5.5", "google/gemini-3.5-flash".
+// native /v1/messages). Swap the model with OPENROUTER_MODEL; use a slug that exists
+// in your account (https://openrouter.ai/models). Examples that support tool calling:
+// "anthropic/claude-opus-4.8", "anthropic/claude-opus-4.8-fast", "openai/gpt-5.5".
 
 import OpenAI from "openai";
+import { log } from "../../shared/logger.js";
+import type { ChatMsg, ChatTool } from "../../shared/types.js";
 
 export const client = new OpenAI({
   apiKey: process.env.OPENROUTER_API_KEY,
   baseURL: process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1",
   defaultHeaders: {
-    // Optional but recommended by OpenRouter for attribution / rankings.
     "HTTP-Referer": process.env.OPENROUTER_SITE_URL ?? "https://example.com",
     "X-Title": "Workflow Ideas Bot",
   },
@@ -21,19 +20,18 @@ export const client = new OpenAI({
 
 export const MODEL = process.env.OPENROUTER_MODEL ?? "anthropic/claude-opus-4.8-fast";
 
-export type ChatMsg = OpenAI.Chat.Completions.ChatCompletionMessageParam;
-export type ChatTool = OpenAI.Chat.Completions.ChatCompletionTool;
-
 /** One round-trip to the model. Returns the assistant message verbatim. */
 export async function chat(
   messages: ChatMsg[],
   tools?: ChatTool[],
 ): Promise<OpenAI.Chat.Completions.ChatCompletionMessage> {
+  const t0 = Date.now();
   const res = await client.chat.completions.create({
     model: MODEL,
     max_tokens: 1200,
     messages,
     ...(tools ? { tools, tool_choice: "auto" } : {}),
   });
+  log("llm.call", { model: MODEL, ms: Date.now() - t0, tokens: res.usage?.total_tokens ?? null });
   return res.choices[0].message;
 }

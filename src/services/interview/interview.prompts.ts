@@ -1,14 +1,11 @@
-// System prompt + tool schemas for the interview/propose agent loop (§4.2).
-//
-// OpenAI/OpenRouter function-calling format. Choosing `ask_user` continues the
-// interview; choosing `propose_ideas` IS the "I'm confident now" decision
-// (termination = a tool choice, not special-cased logic — §6/Q6).
+// System prompt + tool schemas for the interview/propose agent loop (OpenAI format).
+// Choosing ask_user continues the interview; choosing propose_ideas IS the "I'm
+// confident now" decision (termination = a tool choice).
 
-import type { Block } from "./catalog.js";
-import type { ChatTool } from "./llm.js";
-import type { ContextSummary } from "./types.js";
+import type { Block } from "../catalog/catalog.js";
+import type { ChatTool, ContextSummary } from "../../shared/types.js";
 
-export const MAX_QUESTIONS = 4; // hard ceiling (Q6)
+export const MAX_QUESTIONS = 4; // hard ceiling
 
 export const TOOLS: ChatTool[] = [
   {
@@ -23,11 +20,7 @@ export const TOOLS: ChatTool[] = [
         type: "object",
         properties: {
           question: { type: "string" },
-          quick_replies: {
-            type: "array",
-            items: { type: "string" },
-            description: "0-4 short button options. Omit for open-ended questions.",
-          },
+          quick_replies: { type: "array", items: { type: "string" }, description: "0-4 short button options. Omit for open-ended questions." },
         },
         required: ["question"],
       },
@@ -51,24 +44,13 @@ export const TOOLS: ChatTool[] = [
               properties: {
                 title: { type: "string" },
                 problem: { type: "string" },
-                triggeringEvidence: {
-                  type: "string",
-                  description: "The observed signal that motivates this. MUST be non-empty.",
-                },
+                triggeringEvidence: { type: "string", description: "The observed signal that motivates this. MUST be non-empty." },
                 trigger: { type: "string" },
                 steps: { type: "array", items: { type: "string" } },
                 blocks: { type: "array", items: { type: "string" } },
                 effort: { type: "string", enum: ["S", "M", "L"] },
               },
-              required: [
-                "title",
-                "problem",
-                "triggeringEvidence",
-                "trigger",
-                "steps",
-                "blocks",
-                "effort",
-              ],
+              required: ["title", "problem", "triggeringEvidence", "trigger", "steps", "blocks", "effort"],
             },
           },
         },
@@ -78,11 +60,7 @@ export const TOOLS: ChatTool[] = [
   },
 ];
 
-export function systemPrompt(
-  context: ContextSummary,
-  allowed: Block[],
-  questionsAsked: number,
-): string {
+export function systemPrompt(context: ContextSummary, allowed: Block[], questionsAsked: number): string {
   return [
     "You are an agent inside Slack that helps a user find workflow automations worth building.",
     "Your job: a SHORT, sharp interview grounded in what you already observed, then concrete proposals.",

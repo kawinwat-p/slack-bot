@@ -1,0 +1,20 @@
+# ข้อความ seed สำหรับเทสต์ (1 บรรทัด = 1 ข้อความ, บรรทัดที่ขึ้นต้นด้วย # หรือว่างจะถูกข้าม)
+# รูปแบบ: <persona>: <ข้อความ>   (persona เป็นแค่ตัวอักษรนำหน้าให้ดูเหมือนหลายคน)
+bank: deploying payments-svc v2.3.1 to staging 🚀
+noon: staging ล่มอีกแล้วเหรอ? เข้าไม่ได้เลย
+bank: เดี๋ยวเช็คให้ ... อ่อ nightly migration fail อีกแล้ว ทุกเช้าเลยอะ
+noon: 😩 อันนี้รอบที่เท่าไหร่แล้วอาทิตย์นี้
+mint: ใครว่างรีวิว PR #482 หน่อย ค้างมาตั้งแต่เมื่อวานละ
+bank: deploying payments-svc v2.3.2 to staging 🚀 (fix migration)
+noon: QA ถามว่า build ล่าสุดขึ้น staging รึยัง? ไม่รู้จะตอบไง
+earth: PR #482 ยังรอรีวิวอยู่นะ ใครก็ได้ช่วยกดที 🙏
+bank: deploying payments-svc v2.3.3 to production 🚀
+bank: @here deploy prod เสร็จแล้วนะ v2.3.3
+noon: staging เข้าไม่ได้อีกแล้ว 🙃 migration fail ปะ
+bank: ใช่ migration job ล้มตอนตี 2 ไม่มีใคร alert เลย กว่าจะรู้ก็ตอน QA บ่น
+earth: PR #488 review ให้หน่อยได้ไหมครับ รอ 4 ชม.แล้ว
+bank: deploying payments-svc v2.4.0 to staging 🚀
+noon: เราน่าจะมีอะไรบอกอัตโนมัติตอน deploy เนอะ ขี้เกียจพิมพ์ทุกรอบ
+bank: จริง ทุกวันนี้ก๊อป message เดิมมาแก้เลขเอา 😂
+earth: migration นี่เราใช้ cron รันตอนตี 2 ใช่ปะ ถ้ามันพังควรเด้งเข้า Slack เลย
+bank: ใช่ ใช้ GitHub Actions รัน ถ้า fail มันเงียบเลย ไม่มี notification

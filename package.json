@@ -4,8 +4,9 @@
   "description": "Agentic Slack bot that deep-interviews a user from real channel context and proposes buildable workflow ideas.",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/app.ts",
-    "start": "tsx src/app.ts",
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "seed": "tsx scripts/seed-channel.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --experimental-loader ./resolve-hook.mjs verify.ts",
     "build": "tsc"

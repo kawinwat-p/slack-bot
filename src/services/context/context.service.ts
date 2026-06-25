@@ -1,28 +1,23 @@
-// Step 2: retrieve + summarize channel context (§3, Q8).
-//
-// Pull a wide window of recent messages, then run a CHEAP summarize pre-pass into
-// recurring friction patterns. Evidence signals (which catalog blocks the team can
-// use) come from deterministic keyword matching, NOT the LLM. Summarizing keeps the
-// opening question sharp and keeps us inside the context window.
+// Context service — retrieve channel text (via Slack gateway) + summarize (via LLM
+// gateway) into friction patterns. Evidence signals are deterministic (catalog), not
+// model-decided.
 
 import type { WebClient } from "@slack/web-api";
-import { allowedBlocksFor } from "./catalog.js";
-import { chat } from "./llm.js";
-import type { ContextSummary } from "./types.js";
-
-const HISTORY_LIMIT = 200;
+import { getRecentText } from "../../gateways/slack/slack.gateway.js";
+import { chat } from "../../gateways/llm/llm.gateway.js";
+import { log } from "../../shared/logger.js";
+import type { ContextSummary } from "../../shared/types.js";
+import { allowedBlocksFor } from "../catalog/catalog.js";
 
 export async function readChannelText(client: WebClient, channel: string): Promise<string> {
-  const res = await client.conversations.history({ channel, limit: HISTORY_LIMIT });
-  const msgs = (res.messages ?? [])
-    .filter((m) => typeof m.text === "string" && m.text.length > 0)
-    .reverse(); // oldest -> newest
-  return msgs.map((m) => m.text).join("\n");
+  const { text, count } = await getRecentText(client, channel);
+  log("context.read", { channel, messages: count, chars: text.length });
+  return text;
 }
 
 export async function summarizeContext(channelText: string): Promise<ContextSummary> {
-  // Evidence signals are deterministic (§5.1), not model-decided.
   const evidenceSignals = allowedBlocksFor(channelText);
+  log("context.evidence", evidenceSignals);
 
   if (!channelText.trim()) {
     return { patterns: [], evidenceSignals, notes: "No readable recent messages in this channel." };
@@ -38,10 +33,7 @@ export async function summarizeContext(channelText: string): Promise<ContextSumm
         "Quote specifics. Do not invent tools the channel never mentions. " +
         'Reply ONLY as JSON: {"patterns": string[], "notes": string}.',
     },
-    {
-      role: "user",
-      content: `Recent messages (oldest first):\n"""\n${channelText.slice(-12000)}\n"""`,
-    },
+    { role: "user", content: `Recent messages (oldest first):\n"""\n${channelText.slice(-12000)}\n"""` },
   ]);
 
   const text = msg.content ?? "{}";
@@ -52,9 +44,6 @@ export async function summarizeContext(channelText: string): Promise<ContextSumm
     parsed = { patterns: [], notes: "Could not parse summary." };
   }
 
-  return {
-    patterns: parsed.patterns ?? [],
-    evidenceSignals,
-    notes: parsed.notes ?? "",
-  };
+  log("context.summarize", { patterns: parsed.patterns?.length ?? 0 });
+  return { patterns: parsed.patterns ?? [], evidenceSignals, notes: parsed.notes ?? "" };
 }

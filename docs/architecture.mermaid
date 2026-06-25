@@ -1,0 +1,46 @@
+flowchart TD
+    Start([User พิมพ์ /workflow-ideas]) --> Disc[app.ts: โพสต์ disclosure<br/>เปิด thread]
+
+    subgraph CTX["Step 2 — Context (context.ts + catalog.ts)"]
+        Disc --> Read[อ่าน ~200 ข้อความล่าสุด]
+        Read --> Sum[LLM สรุปเป็น friction patterns]
+        Read --> Ev[คำนวณ allowed blocks<br/>= catalog ∩ evidence<br/>deterministic ไม่ใช่ LLM]
+    end
+
+    Sum --> Loop
+    Ev --> Loop
+
+    subgraph AGENT["Agent loop — agent.ts (re-entrant)"]
+        Loop{LLM เลือก tool} -->|ask_user| Q[postQuestion<br/>+ ปุ่ม quick reply / Skip]
+        Q --> Susp[(SUSPEND:<br/>saveState by thread_ts)]
+        Susp -. user ตอบ = event ใหม่ .-> Resume[loadState +<br/>answerPending]
+        Resume --> Ceil{ถาม &lt; 4 ครั้ง<br/>และยังไม่มั่นใจ?}
+        Ceil -->|ใช่| Loop
+        Ceil -->|ครบ/มั่นใจ| Loop
+        Loop -->|propose_ideas| Val[validateIdeas<br/>deterministic]
+    end
+
+    Val --> Reject{ผ่าน validation?}
+    Reject -->|ไม่ผ่าน: block ไม่อนุญาต<br/>หรือไม่มี evidence| Drop[ตัดทิ้ง +<br/>ให้ LLM ลองใหม่]
+    Drop --> Loop
+    Reject -->|ผ่าน| Cards[postIdeaCard<br/>2–4 ใบ + ปุ่ม]
+
+    Cards --> Btn{ผู้ใช้กดปุ่ม}
+    Btn -->|👎 Not it| Drop2[ลบไอเดีย]
+    Btn -->|✏️ Refine| Ref[mini-interview เฉพาะใบนั้น]
+    Ref --> Loop
+    Btn -->|👍 Build this| Blast{blast radius?}
+
+    subgraph BUILD["Build — build.ts (Q10 mixed per-block)"]
+        Blast -->|ใช่ เช่น scheduled post| Appr[postApprovalCard<br/>Confirm / Cancel]
+        Appr -->|Confirm| Exec
+        Blast -->|ไม่ self-contained| Exec[execute ใน Slack จริง<br/>canvas / scheduled msg]
+        Blast -->|block นอก Slack| Hand[คืน snippet พร้อมวาง<br/>GitHub Action / webhook / cron]
+    end
+
+    Exec --> Done([เสร็จ])
+    Hand --> Done
+    Appr -->|Cancel| Done
+
+    LLM[/OpenRouter — llm.ts<br/>OPENROUTER_MODEL/] -.เรียกใช้.- Sum
+    LLM -.เรียกใช้.- Loop
