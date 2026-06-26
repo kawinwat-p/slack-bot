@@ -11,7 +11,9 @@ import { saveState } from "../../repositories/state.repository.js";
 import { log, tid } from "../../shared/logger.js";
 import type { ChatMsg, ConvState } from "../../shared/types.js";
 import { validateIdeas } from "../ideas/ideas.service.js";
+import { validateAskUser } from "./ask-validation.js";
 import { autoDeadendIncompletePains, upsertPain } from "./pain.js";
+import { validateProposeGate } from "./propose-validation.js";
 import { MAX_QUESTIONS, TOOLS, systemPrompt } from "./interview.prompts.js";
 
 export interface AgentDeps {
@@ -45,11 +47,14 @@ export async function runLoop(deps: AgentDeps, state: ConvState): Promise<void> 
     const toolCalls = assistant.tool_calls ?? [];
     log("loop.llm", { thread: T, tool: toolCalls[0]?.function.name ?? "text" });
     if (toolCalls.length === 0) {
-      if (assistant.content) await say(client, state.channel, state.threadTs, assistant.content);
-      state.phase = "done";
-      saveState(state);
-      log("loop.done", { thread: T, reason: "text-reply" });
-      return;
+      log("loop.text.rejected", { thread: T });
+      state.history.push({
+        role: "user",
+        content:
+          "Invalid turn: use ask_user or propose_ideas only — no plain text. " +
+          "Resend as the appropriate tool call.",
+      });
+      continue;
     }
 
     const primary = toolCalls[0];
@@ -57,7 +62,9 @@ export async function runLoop(deps: AgentDeps, state: ConvState): Promise<void> 
     const args = safeParse(primary.function.arguments);
 
     if (primary.function.name === "ask_user") {
-      upsertPain(state, args.pain);
+      const painSnapshot = structuredClone(state.pains);
+      const painIndexSnapshot = state.currentPainIndex;
+      const notesAdvanced = upsertPain(state, args.pain);
 
       if (state.forceProposed) {
         log("loop.forceProposed", { thread: T });
@@ -74,10 +81,22 @@ export async function runLoop(deps: AgentDeps, state: ConvState): Promise<void> 
         continue;
       }
 
+      const lastUserAnswer = state.lastUserAnswer ?? "";
+      const v = validateAskUser(args, state, notesAdvanced, lastUserAnswer);
+      if (!v.ok) {
+        state.pains = painSnapshot;
+        state.currentPainIndex = painIndexSnapshot;
+        log("ask_user.rejected", { thread: T, reason: v.reason });
+        state.history.push(toolResult(primary.id, v.reason));
+        for (const id of otherIds) state.history.push(toolResult(id, "skipped"));
+        continue;
+      }
+
       const question = String(args.question ?? "Tell me more?");
       const quick = Array.isArray(args.quick_replies) ? args.quick_replies.map(String) : [];
       await postQuestion(client, state.channel, state.threadTs, question, quick);
       state.questionsAsked += 1;
+      state.pains[state.currentPainIndex].drillCount += 1;
       state.pending = { kind: "ask_user", toolCallId: primary.id, otherIds };
       saveState(state);
       log("ask_user", { thread: T, n: state.questionsAsked, q: question, pains: state.pains.length });
@@ -87,6 +106,13 @@ export async function runLoop(deps: AgentDeps, state: ConvState): Promise<void> 
 
     if (primary.function.name === "propose_ideas") {
       autoDeadendIncompletePains(state);
+      const gate = validateProposeGate(state);
+      if (!gate.ok) {
+        log("propose.gate.rejected", { thread: T, reason: gate.reason });
+        state.history.push(toolResult(primary.id, gate.reason));
+        for (const id of otherIds) state.history.push(toolResult(id, "skipped"));
+        continue;
+      }
       const { valid, rejected } = validateIdeas(args.ideas ?? []);
       log("propose.validate", { thread: T, valid: valid.length, rejected: rejected.length });
 
@@ -133,6 +159,7 @@ export function answerPending(state: ConvState, text: string): void {
   state.history.push(toolResult(toolCallId, text));
   for (const id of otherIds) state.history.push(toolResult(id, "skipped"));
   state.pending = undefined;
+  state.lastUserAnswer = text;
   log("resume", { thread: tid(state.threadTs), answer: text.slice(0, 80) });
 }
 

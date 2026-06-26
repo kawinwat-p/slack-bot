@@ -1,12 +1,11 @@
 import { validateIdeas } from "./src/services/ideas/ideas.service.js";
-import {
-  autoDeadendIncompletePains,
-  isPainResolved,
-  normalizeState,
-  upsertPain,
-} from "./src/services/interview/pain.js";
+import { getLastUserAnswer, hasImpactSignal } from "./src/services/interview/answer-quality.js";
+import { validateAskUser } from "./src/services/interview/ask-validation.js";
+import { autoDeadendIncompletePains, normalizeState, upsertPain } from "./src/services/interview/pain.js";
+import { MAX_QUESTIONS } from "./src/services/interview/interview.prompts.js";
+import { validateProposeGate } from "./src/services/interview/propose-validation.js";
 import { checkInput } from "./src/shared/input.js";
-import type { ConvState, Pain } from "./src/shared/types.js";
+import type { ConvState } from "./src/shared/types.js";
 
 let pass = 0,
   fail = 0;
@@ -32,8 +31,7 @@ function baseState(overrides: Partial<ConvState> = {}): ConvState {
 
 // --- input ---
 
-
-const okText = (r: ReturnType<typeof checkInput>) => r.ok ? r.text : null;
+const okText = (r: ReturnType<typeof checkInput>) => (r.ok ? r.text : null);
 ok(okText(checkInput("  add a deploy alert  ")) === "add a deploy alert", "clean input trimmed + allowed");
 ok(okText(checkInput(undefined)) === "" && okText(checkInput("")) === "", "empty allowed (text='')");
 ok(!checkInput("x".repeat(1001)).ok, "over 1000 blocked");
@@ -56,6 +54,187 @@ ok(validateIdeas(noSteps).valid.length === 0, "no steps rejected");
 const missing = [{ title: "t", steps: ["s"], effort: "S" }];
 ok(validateIdeas(missing).valid.length === 0, "missing fields rejected");
 
+// --- validateAskUser ---
+{
+  const state = baseState({
+    pains: [
+      {
+        topic: "t",
+        trigger: "a",
+        friction: null,
+        who: null,
+        howOften: null,
+        status: "resolved",
+        drillCount: 1,
+      },
+    ],
+  });
+  const v = validateAskUser({ pain: { status: "resolved" } }, state, true, "");
+  ok(!v.ok && v.reason.includes("only 1 drill"), "validateAskUser: rejects 1 drill resolve");
+}
+
+{
+  const state = baseState({
+    pains: [
+      {
+        topic: "t",
+        trigger: "a",
+        friction: "b",
+        who: "c",
+        howOften: "d",
+        status: "resolved",
+        drillCount: 2,
+      },
+    ],
+  });
+  const v = validateAskUser({ pain: { status: "resolved" } }, state, false, "still drilling");
+  ok(!v.ok && v.reason.includes("didn't add new detail"), "validateAskUser: rejects unchanged notes");
+}
+
+{
+  const state = baseState({
+    pains: [
+      {
+        topic: "t",
+        trigger: "a",
+        friction: "b",
+        who: "c",
+        howOften: "d",
+        status: "resolved",
+        drillCount: 2,
+      },
+    ],
+  });
+  const v = validateAskUser({ pain: { status: "resolved" } }, state, true, "weekly");
+  ok(v.ok, "validateAskUser: accepts 2 drills + notes advanced");
+}
+
+// --- validateAskUser Check 3 ---
+{
+  const state = baseState({
+    pains: [
+      {
+        topic: "deploys",
+        trigger: "daily",
+        friction: null,
+        who: null,
+        howOften: null,
+        status: "drilling",
+        drillCount: 1,
+      },
+    ],
+  });
+  const v = validateAskUser({ pain: { lastAnswerQuality: "thin", who: "POs" } }, state, true, "PO maybe");
+  ok(!v.ok && v.reason.includes("'thin'"), "validateAskUser Check 3: thin + notesAdvanced");
+}
+
+{
+  const state = baseState({
+    pains: [
+      {
+        topic: "t",
+        trigger: "a",
+        friction: null,
+        who: null,
+        howOften: null,
+        status: "drilling",
+        drillCount: 2,
+      },
+    ],
+  });
+  const v = validateAskUser({ pain: { lastAnswerQuality: "thin", status: "resolved" } }, state, false, "maybe");
+  ok(!v.ok && v.reason.includes("'thin'"), "validateAskUser Check 3: thin + resolved");
+}
+
+{
+  const state = baseState({
+    pains: [{ topic: "t", trigger: "a", friction: null, who: null, howOften: null, status: "drilling", drillCount: 1 }],
+  });
+  const v = validateAskUser(
+    { pain: { lastAnswerQuality: "dont_know", howOften: "unknown" } },
+    state,
+    true,
+    "not sure",
+  );
+  ok(v.ok, "validateAskUser: dont_know + advance passes");
+}
+
+// --- getLastUserAnswer ---
+{
+  const history = [
+    { role: "user" as const, content: "Begin." },
+    { role: "tool" as const, tool_call_id: "a", content: "skipped" },
+    { role: "tool" as const, tool_call_id: "b", content: "real answer" },
+    { role: "assistant" as const, content: null },
+  ];
+  ok(getLastUserAnswer(history) === "real answer", "getLastUserAnswer: skips skipped + assistant");
+}
+
+// --- validateProposeGate ---
+{
+  const state = baseState({
+    pains: [
+      {
+        topic: "deploys",
+        trigger: "push",
+        friction: "manual announce",
+        who: null,
+        howOften: null,
+        status: "resolved",
+        drillCount: 2,
+      },
+    ],
+  });
+  ok(validateProposeGate(state).ok, "propose gate: resolved + friction passes");
+}
+
+{
+  const state = baseState({
+    pains: [
+      {
+        topic: "deploys",
+        trigger: "push",
+        friction: null,
+        who: null,
+        howOften: null,
+        status: "drilling",
+        drillCount: 2,
+      },
+    ],
+  });
+  ok(!validateProposeGate(state).ok, "propose gate: all drilling fails");
+}
+
+{
+  const state = baseState({
+    forceProposed: true,
+    pains: [{ topic: "x", trigger: null, friction: null, who: null, howOften: null, status: "drilling", drillCount: 0 }],
+  });
+  ok(validateProposeGate(state).ok, "propose gate: forceProposed bypass");
+}
+
+{
+  const state = baseState({
+    pains: [{ topic: "x", trigger: null, friction: null, who: null, howOften: null, status: "deadend", drillCount: 1 }],
+  });
+  ok(!validateProposeGate(state).ok, "propose gate: deadend no impact fails");
+}
+
+{
+  ok(
+    hasImpactSignal({
+      topic: "t",
+      trigger: null,
+      friction: "",
+      who: "eng",
+      howOften: null,
+      status: "drilling",
+      drillCount: 0,
+    }),
+    "hasImpactSignal: who counts",
+  );
+}
+
 // --- pain: overwrite same topic ---
 {
   const state = baseState();
@@ -64,6 +243,17 @@ ok(validateIdeas(missing).valid.length === 0, "missing fields rejected");
   ok(state.pains.length === 1, "overwrite: single pain");
   ok(state.pains[0].trigger === "push to main", "overwrite: keeps trigger");
   ok(state.pains[0].friction === "manual announce", "overwrite: updates friction");
+  ok(state.pains[0].drillCount === 0, "overwrite: drillCount defaults 0");
+}
+
+// --- pain: notesAdvanced on upsert ---
+{
+  const state = baseState();
+  upsertPain(state, { topic: "deploys", trigger: "push" });
+  const advanced = upsertPain(state, { topic: "deploys", friction: "manual" });
+  ok(advanced, "notesAdvanced: true when friction added");
+  const same = upsertPain(state, { topic: "deploys", friction: "manual" });
+  ok(!same, "notesAdvanced: false when notes unchanged");
 }
 
 // --- pain: append after resolved ---
@@ -75,6 +265,7 @@ ok(validateIdeas(missing).valid.length === 0, "missing fields rejected");
     friction: "b",
     who: "c",
     howOften: "d",
+    status: "resolved",
   });
   ok(state.pains[0].status === "resolved", "append: first pain resolved");
   upsertPain(state, { topic: "staging", trigger: "daily check" });
@@ -86,8 +277,8 @@ ok(validateIdeas(missing).valid.length === 0, "missing fields rejected");
 {
   const state = baseState({
     pains: [
-      { topic: "a", trigger: "1", friction: "2", who: "3", howOften: "4", status: "resolved" },
-      { topic: "b", trigger: "x", friction: null, who: null, howOften: null, status: "drilling" },
+      { topic: "a", trigger: "1", friction: "2", who: "3", howOften: "4", status: "resolved", drillCount: 0 },
+      { topic: "b", trigger: "x", friction: null, who: null, howOften: null, status: "drilling", drillCount: 0 },
     ],
     currentPainIndex: 1,
   });
@@ -97,24 +288,11 @@ ok(validateIdeas(missing).valid.length === 0, "missing fields rejected");
   ok(state.currentPainIndex === 1, "cap: index stays 1");
 }
 
-// --- pain: four slots -> resolved ---
-{
-  const pain: Pain = {
-    topic: "t",
-    trigger: "a",
-    friction: "b",
-    who: "c",
-    howOften: "d",
-    status: "drilling",
-  };
-  ok(isPainResolved(pain), "four slots resolved");
-}
-
 // --- pain: auto-deadend on ceiling ---
 {
   const state = baseState({
-    questionsAsked: 4,
-    pains: [{ topic: "t", trigger: "a", friction: null, who: null, howOften: null, status: "drilling" }],
+    questionsAsked: MAX_QUESTIONS,
+    pains: [{ topic: "t", trigger: "a", friction: null, who: null, howOften: null, status: "drilling", drillCount: 0 }],
   });
   autoDeadendIncompletePains(state);
   ok(state.pains[0].status === "deadend", "auto-deadend on ceiling");
@@ -124,7 +302,7 @@ ok(validateIdeas(missing).valid.length === 0, "missing fields rejected");
 {
   const state = baseState({
     forceProposed: true,
-    pains: [{ topic: "t", trigger: null, friction: null, who: null, howOften: null, status: "drilling" }],
+    pains: [{ topic: "t", trigger: null, friction: null, who: null, howOften: null, status: "drilling", drillCount: 0 }],
   });
   autoDeadendIncompletePains(state);
   ok(state.pains[0].status === "deadend", "auto-deadend on forceProposed");
@@ -140,8 +318,10 @@ ok(validateIdeas(missing).valid.length === 0, "missing fields rejected");
 // --- normalizeState backward compat ---
 {
   const legacy = { threadTs: "1", channel: "C", user: "U", phase: "interview", history: [], questionsAsked: 0, proposedIdeas: [] } as ConvState;
+  legacy.pains = [{ topic: "t", trigger: null, friction: null, who: null, howOften: null, status: "drilling" } as ConvState["pains"][0]];
   normalizeState(legacy);
   ok(Array.isArray(legacy.pains) && legacy.forceProposed === false, "normalizeState defaults");
+  ok(legacy.pains[0].drillCount === 0, "normalizeState drillCount default");
 }
 
 console.log(`PASS ${pass} FAIL ${fail}`);

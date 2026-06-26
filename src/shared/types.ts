@@ -27,6 +27,8 @@ export interface ContextSummary {
 
 export type Phase = "interview" | "propose" | "done";
 
+export type AnswerQuality = "substantive" | "thin" | "dont_know";
+
 /** Four-slot pain tracker for structured interview + model metrics. */
 export interface Pain {
   topic: string;
@@ -35,6 +37,10 @@ export interface Pain {
   who: string | null;
   howOften: string | null;
   status: "drilling" | "resolved" | "deadend";
+  /** # of ask_user turns actually posted against this pain. */
+  drillCount: number;
+  /** Model's label for the answer received on the prior turn. */
+  lastAnswerQuality?: AnswerQuality;
 }
 
 /** Persisted, re-entrant conversation state, keyed by thread_ts. */
@@ -54,6 +60,8 @@ export interface ConvState {
   currentPainIndex: number;
   /** Set by Skip — next ask_user gets a soft nudge instead of posting a question. */
   forceProposed: boolean;
+  /** Latest user reply from answerPending (for answer-quality validation). */
+  lastUserAnswer?: string;
 }
 
 export type PendingInterrupt = { kind: "ask_user"; toolCallId: string; otherIds: string[] };

@@ -48,6 +48,11 @@ export const TOOLS: ChatTool[] = [
                 description:
                   "drilling = still grilling; resolved = you and the user share a clear understanding of this pain; deadend = irrelevant.",
               },
+              lastAnswerQuality: {
+                type: "string",
+                enum: ["substantive", "thin", "dont_know"],
+                description: "Label the answer you JUST received. Omit on first ask_user.",
+              },
             },
             required: ["topic"],
           },
@@ -131,6 +136,19 @@ function sectionInterviewMethod(): string {
     `- Max ${MAX_PAINS} pains per session. Open pain #2 only after pain #1 is resolved or deadend.`,
     "- Mark pain.status resolved the moment understanding is shared; deadend if it turns out irrelevant.",
     "- Call propose_ideas once at least one pain is resolved (or the question budget is nearly exhausted).",
+    "",
+    "After each answer, judge it and set pain.lastAnswerQuality:",
+    "- substantive — a real answer → drill the next aspect normally.",
+    "- thin — vague, off-target, or fragmentary → ask ONE more question on the SAME point.",
+    "  Do not jump to a new aspect, and do not resolve, off a thin answer.",
+    "- dont_know — the user explicitly can't say (any aspect) → accept it; drill another aspect",
+    "  or mark the pain resolved if impact is already clear (friction or who filled).",
+    "  Do NOT re-ask the same thing.",
+    "",
+    "Before propose_ideas (normal path): mark at least one pain resolved with concrete friction",
+    "or who. dont_know on some aspects is fine if impact is clear elsewhere. If nothing",
+    "substantive was learned, mark deadend — do not propose. Skip means the user wants ideas",
+    "anyway.",
   ].join("\n");
 }
 
@@ -165,6 +183,9 @@ function sectionPainState(pains: Pain[], currentIndex: number): string {
       `Pain ${i + 1}${marker}: "${p.topic}" [${p.status}]`,
       `  what you know so far — trigger: ${slotLabel(p.trigger)} | friction: ${slotLabel(p.friction)} | who: ${slotLabel(p.who)} | howOften: ${slotLabel(p.howOften)}`,
     );
+    if (p.lastAnswerQuality && i === currentIndex) {
+      lines.push(`  last answer quality: ${p.lastAnswerQuality}`);
+    }
   }
 
   return lines.join("\n");
