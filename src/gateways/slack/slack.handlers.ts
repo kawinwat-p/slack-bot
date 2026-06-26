@@ -26,7 +26,7 @@ async function runLoopSafe(client: WebClient, deps: AgentDeps, state: ConvState)
 export function registerHandlers(app: App): void {
   const deps = (): AgentDeps => ({ client: app.client });
   // 1. Manual trigger
-  app.command("/workflow-ideas-achi", async ({ command, ack, client }) => {
+  app.command("/workflow-ideas", async ({ command, ack, client }) => {
     await ack();
     const channel = command.channel_id;
     const user = command.user_id;
