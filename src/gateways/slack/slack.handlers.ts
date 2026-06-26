@@ -9,7 +9,7 @@ import { runLoop, answerPending, type AgentDeps } from "../../services/interview
 import { buildIdea } from "../../services/build/build.service.js";
 import { loadState, saveState } from "../../repositories/state.repository.js";
 import { log } from "../../shared/logger.js";
-import { clampInput } from "../../shared/input.js";
+import { checkInput } from "../../shared/input.js";
 import { withThreadLock } from "../../shared/thread-lock.js";
 import type { ConvState } from "../../shared/types.js";
 
@@ -30,7 +30,13 @@ export function registerHandlers(app: App): void {
     await ack();
     const channel = command.channel_id;
     const user = command.user_id;
-    const userPrompt = clampInput(command.text);
+    const check = checkInput(command.text);
+    if (!check.ok) {
+      log("command.blocked", { user, channel, reason: check.reason });
+      await client.chat.postEphemeral({ channel, user, text: `:no_entry: ${check.reason}` });
+      return;
+    }
+    const userPrompt = check.text;
     log("command", { cmd: "/workflow-ideas", user, channel, prompt: userPrompt || null });
     const threadTs = await postParent(
       client,
@@ -74,17 +80,19 @@ export function registerHandlers(app: App): void {
   app.message(async ({ message, client }) => {
     const m = message as any;
     if (m.subtype || !m.thread_ts || m.bot_id) return;
-    const threadTs = m.thread_ts as string;
-    const text = clampInput(m.text);
-    if (!text) return;
-    await withThreadLock(threadTs, async () => {
-      const state = loadState(threadTs);
-      if (!state || state.pending?.kind !== "ask_user") return;
-      log("event.reply", { channel: m.channel });
-      answerPending(state, text);
-      saveState(state);
-      await runLoopSafe(client, deps(), state);
-    });
+    const state = loadState(m.thread_ts);
+    if (!state || state.pending?.kind !== "ask_user") return;
+    const check = checkInput(m.text);
+    if (check.ok && !check.text) return; // empty/whitespace reply — ignore
+    if (!check.ok) {
+      log("event.reply.blocked", { channel: m.channel, reason: check.reason });
+      await say(client, m.channel, m.thread_ts, `:no_entry: ${check.reason}`);
+      return; // keep pending so the user can retry
+    }
+    log("event.reply", { channel: m.channel });
+    answerPending(state, check.text);
+    saveState(state);
+    await runLoop(deps(), state);
   });
 
   // 3. Quick-reply buttons + Skip
