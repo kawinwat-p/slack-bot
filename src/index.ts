@@ -16,3 +16,16 @@ registerHandlers(app);
 
 await app.start();
 console.log("⚡ workflow-ideas bot running (Socket Mode)");
+
+async function shutdown(signal: string): Promise<void> {
+  console.log(`${signal} received — closing Slack connection…`);
+  try {
+    await app.stop();
+  } catch (err) {
+    console.error("Shutdown error:", err);
+  }
+  process.exit(0);
+}
+
+process.once("SIGINT", () => void shutdown("SIGINT"));
+process.once("SIGTERM", () => void shutdown("SIGTERM"));

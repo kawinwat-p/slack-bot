@@ -8,11 +8,12 @@
     "start": "tsx src/index.ts",
     "seed": "tsx scripts/seed-channel.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --experimental-loader ./resolve-hook.mjs verify.ts",
+    "test": "node --experimental-strip-types --experimental-loader ./resolve-hook.mjs verify.ts && node --experimental-strip-types --experimental-loader ./resolve-hook.mjs interview.harness.ts",
     "build": "tsc"
   },
   "dependencies": {
     "@slack/bolt": "^3.21.0",
+    "async-mutex": "^0.5.0",
     "dotenv": "^16.4.5",
     "openai": "^4.67.0"
   },

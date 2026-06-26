@@ -27,6 +27,16 @@ export interface ContextSummary {
 
 export type Phase = "interview" | "propose" | "done";
 
+/** Four-slot pain tracker for structured interview + model metrics. */
+export interface Pain {
+  topic: string;
+  trigger: string | null;
+  friction: string | null;
+  who: string | null;
+  howOften: string | null;
+  status: "drilling" | "resolved" | "deadend";
+}
+
 /** Persisted, re-entrant conversation state, keyed by thread_ts. */
 export interface ConvState {
   threadTs: string;
@@ -38,6 +48,12 @@ export interface ConvState {
   questionsAsked: number;
   proposedIdeas: Idea[];
   pending?: PendingInterrupt;
+  /** Accumulated pains as the agent drills (max 2 per session). */
+  pains: Pain[];
+  /** Index into `pains` for the pain currently being drilled. */
+  currentPainIndex: number;
+  /** Set by Skip — next ask_user gets a soft nudge instead of posting a question. */
+  forceProposed: boolean;
 }
 
 export type PendingInterrupt = { kind: "ask_user"; toolCallId: string; otherIds: string[] };

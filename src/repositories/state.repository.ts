@@ -3,6 +3,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { normalizeState } from "../services/interview/pain.js";
 import { log, tid } from "../shared/logger.js";
 import type { ConvState } from "../shared/types.js";
 
@@ -18,7 +19,7 @@ export function loadState(threadTs: string): ConvState | undefined {
     return undefined;
   }
   log("state.load", { thread: tid(threadTs), found: true });
-  return JSON.parse(readFileSync(f, "utf8")) as ConvState;
+  return normalizeState(JSON.parse(readFileSync(f, "utf8")) as ConvState);
 }
 
 export function saveState(state: ConvState): void {

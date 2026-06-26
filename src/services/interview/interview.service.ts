@@ -11,10 +11,12 @@ import { saveState } from "../../repositories/state.repository.js";
 import { log, tid } from "../../shared/logger.js";
 import type { ChatMsg, ConvState } from "../../shared/types.js";
 import { validateIdeas } from "../ideas/ideas.service.js";
+import { autoDeadendIncompletePains, upsertPain } from "./pain.js";
 import { MAX_QUESTIONS, TOOLS, systemPrompt } from "./interview.prompts.js";
 
 export interface AgentDeps {
   client: WebClient;
+  chatFn?: typeof chat;
 }
 
 const MAX_ITERS = 6;
@@ -25,15 +27,19 @@ function toolResult(id: string, content: string): ChatMsg {
 
 export async function runLoop(deps: AgentDeps, state: ConvState): Promise<void> {
   const { client } = deps;
+  const chatRound = deps.chatFn ?? chat;
   const T = tid(state.threadTs);
 
   for (let i = 0; i < MAX_ITERS; i++) {
     log("loop.iter", { thread: T, iter: i, asked: state.questionsAsked });
     const messages: ChatMsg[] = [
-      { role: "system", content: systemPrompt(state.context!, state.questionsAsked) },
+      {
+        role: "system",
+        content: systemPrompt(state.context!, state.questionsAsked, state.pains, state.currentPainIndex),
+      },
       ...state.history,
     ];
-    const assistant = await chat(messages, TOOLS);
+    const assistant = await chatRound(messages, TOOLS);
     state.history.push(assistant as ChatMsg);
 
     const toolCalls = assistant.tool_calls ?? [];
@@ -51,6 +57,15 @@ export async function runLoop(deps: AgentDeps, state: ConvState): Promise<void> 
     const args = safeParse(primary.function.arguments);
 
     if (primary.function.name === "ask_user") {
+      upsertPain(state, args.pain);
+
+      if (state.forceProposed) {
+        log("loop.forceProposed", { thread: T });
+        state.history.push(toolResult(primary.id, "User wants ideas now. Call propose_ideas."));
+        for (const id of otherIds) state.history.push(toolResult(id, "skipped"));
+        continue;
+      }
+
       if (state.questionsAsked >= MAX_QUESTIONS) {
         log("loop.ceiling", { thread: T, asked: state.questionsAsked });
         for (const t of toolCalls) {
@@ -58,18 +73,20 @@ export async function runLoop(deps: AgentDeps, state: ConvState): Promise<void> 
         }
         continue;
       }
+
       const question = String(args.question ?? "Tell me more?");
       const quick = Array.isArray(args.quick_replies) ? args.quick_replies.map(String) : [];
       await postQuestion(client, state.channel, state.threadTs, question, quick);
       state.questionsAsked += 1;
       state.pending = { kind: "ask_user", toolCallId: primary.id, otherIds };
       saveState(state);
-      log("ask_user", { thread: T, n: state.questionsAsked, q: question });
+      log("ask_user", { thread: T, n: state.questionsAsked, q: question, pains: state.pains.length });
       log("suspend", { thread: T });
       return;
     }
 
     if (primary.function.name === "propose_ideas") {
+      autoDeadendIncompletePains(state);
       const { valid, rejected } = validateIdeas(args.ideas ?? []);
       log("propose.validate", { thread: T, valid: valid.length, rejected: rejected.length });
 

@@ -43,6 +43,13 @@ export async function postParent(client: WebClient, channel: string, text: strin
 // ---- WRITE: Block Kit ----
 
 const SKIP_ACTION = "skip_interview";
+const MAX_BUTTON_TEXT = 75; // Slack plain_text limit for button labels
+
+function clampButtonText(text: string): string {
+  const t = text.trim();
+  if (t.length <= MAX_BUTTON_TEXT) return t;
+  return `${t.slice(0, MAX_BUTTON_TEXT - 1)}…`;
+}
 
 export async function postQuestion(
   client: WebClient,
@@ -53,8 +60,8 @@ export async function postQuestion(
 ): Promise<void> {
   const buttons: any[] = quickReplies.slice(0, 4).map((label, i) => ({
     type: "button",
-    text: { type: "plain_text", text: label },
-    value: label,
+    text: { type: "plain_text", text: clampButtonText(label) },
+    value: label.trim().slice(0, 2000),
     action_id: `answer_${i}`,
   }));
   buttons.push({
@@ -109,6 +116,10 @@ export async function postIdeaCard(
 // ---- WRITE: real side effects (build) ----
 
 export async function createCanvas(client: WebClient, title: string, markdown: string): Promise<string> {
-  const res = await client.canvases.create({ title, document_content: { type: "markdown", markdown } });
+  // canvases API exists at runtime; Slack SDK types may lag behind manifest scopes
+  const res = await (client as WebClient & { canvases: { create: (args: unknown) => Promise<{ canvas_id?: string }> } }).canvases.create({
+    title,
+    document_content: { type: "markdown", markdown },
+  });
   return res.canvas_id ?? "created";
 }
