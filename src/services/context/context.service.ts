@@ -6,19 +6,49 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { WebClient } from "@slack/web-api";
-import { getRecentText } from "../../gateways/slack/slack.gateway.js";
+import { getRecentMessages } from "../../gateways/slack/slack.gateway.js";
 import { chat } from "../../gateways/llm/llm.gateway.js";
+import { embed } from "../../gateways/llm/embed.gateway.js";
+import { cosineTopK } from "./rag.js";
 import { log } from "../../shared/logger.js";
 import type { ContextSummary } from "../../shared/types.js";
 
-export async function readChannelText(client: WebClient, channel: string): Promise<string> {
-  const { text, count } = await getRecentText(client, channel);
-  log("context.read", { channel, messages: count, chars: text.length });
-  // chat ดิบเต็ม ๆ เขียนลงไฟล์ (คอนโซลตัดบรรทัดยาว) เปิดดูครบที่ path ด้านล่าง
+const NO_PROMPT_PAGES = 1; // no prompt -> latest ~1000 messages only
+const RAG_TOP_K = 100; // with a prompt -> embed the whole channel, keep the top 100
+
+function dumpRaw(channel: string, messages: string[]): void {
   const file = join(process.cwd(), ".state", `raw-${channel}.txt`);
-  writeFileSync(file, text);
-  log("context.raw", { file, chars: text.length });
-  return text;
+  writeFileSync(file, messages.join("\n")); // full raw chat (console truncates long lines)
+  log("context.raw", { file, messages: messages.length });
+}
+
+/** Choose the messages to summarize:
+ *  - no prompt  -> the latest ~1000 messages.
+ *  - has prompt -> embed the WHOLE channel, RAG the top 100 most relevant to the prompt.
+ *  Falls back to the latest 1000 if embedding is unavailable (no key) or errors. */
+export async function gatherContextText(client: WebClient, channel: string, userPrompt: string): Promise<string> {
+  if (!userPrompt.trim()) {
+    const messages = await getRecentMessages(client, channel, NO_PROMPT_PAGES);
+    log("context.read", { channel, messages: messages.length, mode: "recent" });
+    dumpRaw(channel, messages);
+    return messages.join("\n");
+  }
+
+  const messages = await getRecentMessages(client, channel); // whole channel
+  log("context.read", { channel, messages: messages.length, mode: "rag" });
+  dumpRaw(channel, messages);
+  if (messages.length <= RAG_TOP_K) return messages.join("\n"); // nothing to filter
+
+  try {
+    const [queryVec] = await embed([userPrompt.trim()]);
+    const docVecs = await embed(messages);
+    const picked = cosineTopK(queryVec, docVecs, RAG_TOP_K).sort((a, b) => a - b); // back to chronological
+    log("context.rag", { total: messages.length, picked: picked.length });
+    return picked.map((i) => messages[i]).join("\n");
+  } catch (e) {
+    log("context.rag.fail", { error: String(e) }); // no embedding provider / API error
+    return messages.slice(-1000).join("\n"); // fall back to latest 1000
+  }
 }
 
 export async function summarizeContext(channelText: string, userPrompt = ""): Promise<ContextSummary> {

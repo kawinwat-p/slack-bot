@@ -5,6 +5,7 @@ import { autoDeadendIncompletePains, normalizeState, upsertPain } from "./src/se
 import { MAX_QUESTIONS } from "./src/services/interview/interview.prompts.js";
 import { validateProposeGate } from "./src/services/interview/propose-validation.js";
 import { checkInput } from "./src/shared/input.js";
+import { cosineTopK } from "./src/services/context/rag.js";
 import type { ConvState } from "./src/shared/types.js";
 
 let pass = 0,
@@ -40,6 +41,10 @@ ok(!checkInput("my id is 1234567890123").ok, "PII (national id) blocked");
 ok(!checkInput("email me at a@b.com").ok, "PII (email) blocked");
 ok(!checkInput("this is shit").ok, "abuse blocked");
 ok(checkInput("deploys announced by hand, painful").ok, "normal pain text passes");
+
+// --- cosineTopK (RAG retrieval) ---
+ok(cosineTopK([1, 0], [[1, 0], [0, 1], [0.9, 0.1]], 2).join(",") === "0,2", "cosineTopK picks the two nearest");
+ok(cosineTopK([1, 0], [[0, 1], [1, 0]], 1)[0] === 1, "cosineTopK returns best index");
 
 // --- validateIdeas ---
 const good = [{ title: "t", problem: "p", triggeringEvidence: "saw 15 msgs", trigger: "tr", steps: ["s"], effort: "S" }];

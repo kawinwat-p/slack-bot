@@ -1,0 +1,125 @@
+# Large seed (~130 msgs) for testing RAG: payments-svc dev channel chatter
+# Core pains (deploy announce / migration fail / PR review delay / staging down)
+# interleaved with off-topic decoys so top-K retrieval has signal to separate.
+# Run:  SEED_CHANNEL=Cxxxx SEED_FILE=samples/seed-messages-large.txt npm run seed
+
+bank: morning ทุกคน
+noon: อรุณสวัสดิ์ ใครไป standup ห้องไหน
+mint: ขอกาแฟแก้วนึงก่อน สมองยังไม่ทำงาน
+earth: เมื่อคืนดูบอลกันไหม
+bank: deploying payments-svc v2.3.0 to staging :rocket:
+noon: staging เข้าไม่ได้อะ ใครแก้
+bank: เดี๋ยวเช็คให้ ... nightly migration fail อีกแล้ว
+noon: อีกแล้วเหรอ รอบที่เท่าไหร่เนี่ย
+mint: PR #470 ใครรีวิวหน่อย ค้างมาสองวันละ
+earth: เดี๋ยวกดให้ตอนบ่าย
+pm: เที่ยงนี้กินอะไรกันดี
+noon: ตามสะดวก ข้าวมันไก่มะ
+bank: deploying payments-svc v2.3.1 to staging :rocket:
+qa: build ล่าสุดขึ้น staging รึยังคะ จะได้เทส
+bank: ขึ้นแล้ว v2.3.1 นะ
+qa: ขอบคุณค่า
+earth: PR #472 ด้วยนะ รอ review อยู่
+mint: migration นี่มันรันตอนกี่โมง
+bank: cron ตี 2 ทุกคืน ถ้า fail มันเงียบเลย
+noon: นั่นแหละปัญหา ไม่มี alert กว่าจะรู้ก็เช้า
+pm: ขอ update sprint หน่อย ใครติดอะไรบ้าง
+earth: ติด review PR เป็นหลัก
+qa: staging ล่มอีกแล้ว เทสไม่ได้เลยตอนนี้
+bank: migration fail อีกแล้วจริงด้วย ขอโทษๆ
+noon: เราน่าจะมีอะไร alert ตอน migration พังเนอะ
+bank: เห็นด้วย ทุกวันนี้รู้ตอน QA บ่นตลอด
+mint: ใครมี link doc deploy process บ้าง
+earth: อยู่ใน notion นะ เดี๋ยวส่งให้
+pm: ประชุม retro ศุกร์นี้บ่าย 3 นะทุกคน
+noon: รับทราบ
+bank: deploying payments-svc v2.3.2 to staging :rocket: (fix migration)
+qa: เทสแล้ว v2.3.2 staging โอเค migration ผ่าน
+bank: เย่ รอบนี้รอด
+earth: PR #475 review ให้หน่อยครับ รอ 3 ชม.แล้ว
+mint: โทษๆ เดี๋ยวกด
+noon: กาแฟร้านหน้าออฟฟิศขึ้นราคาแล้วนะ
+earth: จริงดิ เศร้า
+bank: deploying payments-svc v2.3.3 to production :rocket:
+bank: @here deploy prod เสร็จแล้ว v2.3.3 นะทุกคน
+qa: prod ดูปกติดี
+pm: ดีมาก
+noon: staging เข้าไม่ได้อีกละ migration ปะ
+bank: ใช่ migration job ล้มตอนตี 2 ไม่มีใคร alert เลย
+qa: กว่าจะรู้ก็ตอนเช้าทุกที
+mint: เราทำ notification เข้า slack ตอน migration fail ได้ปะ
+earth: น่าจะดี ใช้ GitHub Actions รันอยู่แล้วนี่
+bank: ใช่ ถ้า fail มันเงียบ ไม่มี notification เลย
+pm: ขอ ticket ไว้ใน backlog นะเรื่อง migration alert
+noon: จดให้แล้ว
+earth: ใครเอา charger type-c มาบ้าง ขอยืม
+mint: เดี๋ยวเอาให้
+bank: deploying payments-svc v2.4.0 to staging :rocket:
+qa: เทส v2.4.0 staging อยู่นะ
+noon: เราน่าจะมีบอทบอกอัตโนมัติตอน deploy เนอะ ขี้เกียจพิมพ์
+bank: จริง ทุกวันนี้ก๊อป message เดิมมาแก้เลขเอา 555
+earth: PR #480 review หน่อยครับ
+mint: PR #482 ด้วย ค้างมาตั้งแต่เมื่อวาน
+noon: review queue ยาวมากช่วงนี้
+pm: เดี๋ยว sprint หน้าจัด pair review ดีไหม
+earth: เห็นด้วย
+qa: v2.4.0 staging ผ่าน เทสเสร็จแล้ว
+bank: deploying payments-svc v2.4.1 to staging :rocket:
+noon: ทำไม deploy บ่อยจังวันนี้ 555
+bank: fix เล็กๆ น่ะ
+mint: ใครว่างช่วยดู flaky test ใน CI หน่อย มันแดงสุ่มๆ
+earth: อันนั้นมันค้างมานานละ
+pm: lunch กันยัง
+noon: ยังเลย หิวละ
+bank: deploying payments-svc v2.4.2 to production :rocket:
+bank: @here prod v2.4.2 ขึ้นแล้วนะ
+qa: prod ดูดี
+noon: staging ดับอีกแล้ว... migration สินะ
+bank: ใช่อีกแล้ว ตี 2 fail เงียบเหมือนเดิม
+qa: อันนี้รอบที่ 5 ของอาทิตย์นี้ละมั้ง
+mint: ต้องทำ alert จริงจังละ เสียเวลาทุกเช้า
+earth: PR #485 review ครับ รอ 4 ชม.
+noon: โทษๆ เดี๋ยวกด
+pm: standup พรุ่งนี้เลื่อนเป็น 10 โมงนะ
+earth: รับทราบ
+mint: meeting เยอะจังวันนี้
+bank: deploying payments-svc v2.5.0 to staging :rocket:
+qa: build v2.5.0 ขึ้น staging รึยังคะ
+bank: ขึ้นแล้ว
+qa: ขอบคุณค่า
+noon: เราควรมี dashboard บอกว่า build ไหนอยู่ staging/prod เนอะ
+earth: QA จะได้ไม่ต้องถามทุกรอบ
+qa: ใช่ ทุกวันนี้ต้องมาถามใน chat ตลอด
+pm: จดเป็น improvement ไว้
+mint: ใครกินกาแฟเย็นบ้าง สั่งรวม
+earth: เอาๆ ขออเมริกาโน่
+noon: ลาเต้เย็นจ้า
+bank: deploying payments-svc v2.5.1 to staging :rocket:
+earth: PR #488 review ให้หน่อยครับ รอนานละ
+mint: เดี๋ยวกดให้
+qa: v2.5.1 staging โอเค
+noon: migration เมื่อคืนรอดไหม
+bank: รอดนะ คืนนี้ไม่ fail
+mint: แปลกใจ 555
+pm: retro เลื่อนเป็นจันทร์หน้านะ
+earth: รับทราบ
+bank: deploying payments-svc v2.5.2 to production :rocket:
+bank: @here prod v2.5.2 เสร็จแล้ว
+qa: prod ปกติดี
+noon: deploy announce นี่น่าจะ automate ได้แล้วจริงๆ
+bank: เนอะ พิมพ์เองทุกรอบเหนื่อย
+earth: ทำ GitHub Action ยิง webhook เข้า slack ก็ได้นี่
+mint: น่าจะง่ายกว่าที่คิด
+pm: เอาเข้า sprint หน้าเลย เรื่อง deploy notification + migration alert
+noon: โอเค สองอันนี้สำคัญสุด
+qa: + dashboard build status ด้วยได้ไหม
+pm: จดไว้แล้ว
+earth: ใครจะ off ศุกร์นี้บ้าง
+mint: เราลาครึ่งวันบ่าย
+noon: จดไว้
+bank: deploying payments-svc v2.6.0 to staging :rocket:
+qa: เทส v2.6.0 อยู่
+earth: PR #490 review ครับ อันสุดท้ายของวันละ
+mint: เดี๋ยวกด ปิดงานพอดี
+noon: เลิกงานกันเถอะ เหนื่อยละ
+bank: bye ทุกคน
