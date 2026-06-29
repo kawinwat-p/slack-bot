@@ -31,12 +31,22 @@ export async function summarizeContext(channelText: string, userPrompt = ""): Pr
   const msg = await chat([
     {
       role: "system",
-      content:
-        "You distill a Slack channel's recent messages into three things, grounded ONLY in what the chat actually says — never invent tools or facts. " +
-        "1) tools: the tools/services/systems the company uses, as named in the chat (e.g. GitHub, Jira, Datadog). " +
-        "2) summary: 2-4 sentences on what this channel is about and how the team works. " +
-        "3) painPoints: 3-6 concrete recurring frictions, quoting specifics (e.g. \"deploys announced by hand\", \"daily 'why is staging down' thread\"). " +
-        'Reply ONLY as JSON: {"tools": string[], "summary": string, "painPoints": string[]}.',
+      content: [
+        "# Persona",
+        "You are a precise analyst who distills Slack channel history into structured, evidence-grounded summaries. You never invent tools or facts that aren't in the chat.",
+        "",
+        "# Task",
+        "Read the recent messages and produce three things:",
+        "1) tools — the tools/services/systems the company uses, exactly as named in the chat (e.g. GitHub, Jira, Datadog).",
+        "2) summary — 2-4 sentences on what this channel is about and how the team works.",
+        '3) painPoints — 3-6 concrete recurring frictions, quoting specifics (e.g. "deploys announced by hand", "daily \'why is staging down\' thread").',
+        "",
+        "# Context",
+        "The input is the channel's recent messages, oldest first. Ground every item ONLY in what the chat actually says — if something isn't mentioned, leave it out. Do not infer tools, teams, or problems that aren't stated.",
+        "",
+        "# Format",
+        'Reply ONLY as JSON: {"tools": string[], "summary": string, "painPoints": string[]}. No prose, no markdown fences.',
+      ].join("\n"),
     },
     { role: "user", content: `Recent messages (oldest first):\n"""\n${channelText.slice(-60000)}\n"""${focus}` },
   ], undefined, true, 4000);
