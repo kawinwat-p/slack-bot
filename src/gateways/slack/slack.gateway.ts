@@ -11,8 +11,9 @@ const MAX_PAGES = 50; // ponytail: ~50k-message ceiling so a giant channel can't
 
 // ---- READ ----
 
-/** Pull the channel's full history (paginated, oldest -> newest). */
-export async function getRecentText(client: WebClient, channel: string): Promise<{ text: string; count: number }> {
+/** Pull channel messages (paginated), oldest -> newest. maxPages bounds the fetch:
+ *  1 page = latest ~1000 messages; default = the whole channel up to the ceiling. */
+export async function getRecentMessages(client: WebClient, channel: string, maxPages = MAX_PAGES): Promise<string[]> {
   const texts: string[] = [];
   let cursor: string | undefined;
   let pages = 0;
@@ -23,10 +24,10 @@ export async function getRecentText(client: WebClient, channel: string): Promise
     }
     cursor = res.response_metadata?.next_cursor || undefined;
     pages++;
-  } while (cursor && pages < MAX_PAGES);
-  if (cursor) log("context.read.capped", { channel, pages: MAX_PAGES }); // hit the ceiling, older msgs skipped
+  } while (cursor && pages < maxPages);
+  if (cursor) log("context.read.capped", { channel, pages: maxPages }); // hit the ceiling, older msgs skipped
   texts.reverse(); // pages came newest-first; flip the whole list to oldest -> newest
-  return { text: texts.join("\n"), count: texts.length };
+  return texts;
 }
 
 // ---- WRITE: plain ----

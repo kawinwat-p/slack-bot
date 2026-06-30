@@ -4,7 +4,7 @@
 import type { App } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import { postParent, say } from "./slack.gateway.js";
-import { readChannelText, summarizeContext } from "../../services/context/context.service.js";
+import { gatherContextText, summarizeContext } from "../../services/context/context.service.js";
 import { runLoop, answerPending, type AgentDeps } from "../../services/interview/interview.service.js";
 import { buildIdea } from "../../services/build/build.service.js";
 import { loadState, saveState } from "../../repositories/state.repository.js";
@@ -45,7 +45,7 @@ export function registerHandlers(app: App): void {
         "(used only for this session). Give me a moment to look…",
     );
     await withThreadLock(threadTs, async () => {
-      const channelText = await readChannelText(client, channel);
+      const channelText = await gatherContextText(client, channel, userPrompt);
       const context = await summarizeContext(channelText, userPrompt);
       console.log("context", context);
       console.log("channelText", channelText);

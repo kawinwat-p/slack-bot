@@ -6,19 +6,49 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { WebClient } from "@slack/web-api";
-import { getRecentText } from "../../gateways/slack/slack.gateway.js";
+import { getRecentMessages } from "../../gateways/slack/slack.gateway.js";
 import { chat } from "../../gateways/llm/llm.gateway.js";
+import { embed } from "../../gateways/llm/embed.gateway.js";
+import { cosineTopK } from "./rag.js";
 import { log } from "../../shared/logger.js";
 import type { ContextSummary } from "../../shared/types.js";
 
-export async function readChannelText(client: WebClient, channel: string): Promise<string> {
-  const { text, count } = await getRecentText(client, channel);
-  log("context.read", { channel, messages: count, chars: text.length });
-  // chat ดิบเต็ม ๆ เขียนลงไฟล์ (คอนโซลตัดบรรทัดยาว) เปิดดูครบที่ path ด้านล่าง
+const NO_PROMPT_PAGES = 1; // no prompt -> latest ~1000 messages only
+const RAG_TOP_K = 100; // with a prompt -> embed the whole channel, keep the top 100
+
+function dumpRaw(channel: string, messages: string[]): void {
   const file = join(process.cwd(), ".state", `raw-${channel}.txt`);
-  writeFileSync(file, text);
-  log("context.raw", { file, chars: text.length });
-  return text;
+  writeFileSync(file, messages.join("\n")); // full raw chat (console truncates long lines)
+  log("context.raw", { file, messages: messages.length });
+}
+
+/** Choose the messages to summarize:
+ *  - no prompt  -> the latest ~1000 messages.
+ *  - has prompt -> embed the WHOLE channel, RAG the top 100 most relevant to the prompt.
+ *  Falls back to the latest 1000 if embedding is unavailable (no key) or errors. */
+export async function gatherContextText(client: WebClient, channel: string, userPrompt: string): Promise<string> {
+  if (!userPrompt.trim()) {
+    const messages = await getRecentMessages(client, channel, NO_PROMPT_PAGES);
+    log("context.read", { channel, messages: messages.length, mode: "recent" });
+    dumpRaw(channel, messages);
+    return messages.join("\n");
+  }
+
+  const messages = await getRecentMessages(client, channel); // whole channel
+  log("context.read", { channel, messages: messages.length, mode: "rag" });
+  dumpRaw(channel, messages);
+  if (messages.length <= RAG_TOP_K) return messages.join("\n"); // nothing to filter
+
+  try {
+    const [queryVec] = await embed([userPrompt.trim()]);
+    const docVecs = await embed(messages);
+    const picked = cosineTopK(queryVec, docVecs, RAG_TOP_K).sort((a, b) => a - b); // back to chronological
+    log("context.rag", { total: messages.length, picked: picked.length });
+    return picked.map((i) => messages[i]).join("\n");
+  } catch (e) {
+    log("context.rag.fail", { error: String(e) }); // no embedding provider / API error
+    return messages.slice(-1000).join("\n"); // fall back to latest 1000
+  }
 }
 
 export async function summarizeContext(channelText: string, userPrompt = ""): Promise<ContextSummary> {
@@ -31,12 +61,22 @@ export async function summarizeContext(channelText: string, userPrompt = ""): Pr
   const msg = await chat([
     {
       role: "system",
-      content:
-        "You distill a Slack channel's recent messages into three things, grounded ONLY in what the chat actually says — never invent tools or facts. " +
-        "1) tools: the tools/services/systems the company uses, as named in the chat (e.g. GitHub, Jira, Datadog). " +
-        "2) summary: 2-4 sentences on what this channel is about and how the team works. " +
-        "3) painPoints: 3-6 concrete recurring frictions, quoting specifics (e.g. \"deploys announced by hand\", \"daily 'why is staging down' thread\"). " +
-        'Reply ONLY as JSON: {"tools": string[], "summary": string, "painPoints": string[]}.',
+      content: [
+        "# Persona",
+        "You are a precise analyst who distills Slack channel history into structured, evidence-grounded summaries. You never invent tools or facts that aren't in the chat.",
+        "",
+        "# Task",
+        "Read the recent messages and produce three things:",
+        "1) tools — the tools/services/systems the company uses, exactly as named in the chat (e.g. GitHub, Jira, Datadog).",
+        "2) summary — 2-4 sentences on what this channel is about and how the team works.",
+        '3) painPoints — 3-6 concrete recurring frictions, quoting specifics (e.g. "deploys announced by hand", "daily \'why is staging down\' thread").',
+        "",
+        "# Context",
+        "The input is the channel's recent messages, oldest first. Ground every item ONLY in what the chat actually says — if something isn't mentioned, leave it out. Do not infer tools, teams, or problems that aren't stated.",
+        "",
+        "# Format",
+        'Reply ONLY as JSON: {"tools": string[], "summary": string, "painPoints": string[]}. No prose, no markdown fences.',
+      ].join("\n"),
     },
     { role: "user", content: `Recent messages (oldest first):\n"""\n${channelText.slice(-60000)}\n"""${focus}` },
   ], undefined, true, 4000);
