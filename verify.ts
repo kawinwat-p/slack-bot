@@ -1,4 +1,5 @@
 import { validateIdeas } from "./src/services/ideas/ideas.service.js";
+import { isContentful } from "./src/gateways/slack/slack.gateway.js";
 import {
   getLastUserAnswer,
   hasImpactSignal,
@@ -12,7 +13,6 @@ import {
 import { MAX_QUESTIONS } from "./src/services/interview/interview.prompts.js";
 import { validateProposeGate } from "./src/services/interview/propose-validation.js";
 import { checkInput } from "./src/shared/input.js";
-import { cosineTopK } from "./src/services/context/rag.js";
 import type { ConvState } from "./src/shared/types.js";
 
 let pass = 0,
@@ -58,30 +58,13 @@ ok(
   "normal pain text passes",
 );
 
-// --- cosineTopK (RAG retrieval) ---
-ok(
-  cosineTopK(
-    [1, 0],
-    [
-      [1, 0],
-      [0, 1],
-      [0.9, 0.1],
-    ],
-    2,
-  ).join(",") === "0,2",
-  "cosineTopK picks the two nearest",
-);
-ok(
-  cosineTopK(
-    [1, 0],
-    [
-      [0, 1],
-      [1, 0],
-    ],
-    1,
-  )[0] === 1,
-  "cosineTopK returns best index",
-);
+// --- isContentful (emoji-only messages don't count) ---
+ok(!isContentful(":heart:"), "shortcode-only excluded");
+ok(!isContentful(":kissing: :innocent:"), "multiple shortcodes excluded");
+ok(!isContentful("😀😀"), "unicode emoji excluded");
+ok(!isContentful("   "), "whitespace excluded");
+ok(isContentful("staging ล่มอีกแล้ว :weary:"), "text + emoji kept");
+ok(isContentful("deploy v2.3.1"), "plain text kept");
 
 // --- validateIdeas ---
 const good = [

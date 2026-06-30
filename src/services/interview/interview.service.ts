@@ -6,7 +6,7 @@
 
 import type { WebClient } from "@slack/web-api";
 import { chat } from "../../gateways/llm/llm.gateway.js";
-import { postIdeaCard, postQuestion, say } from "../../gateways/slack/slack.gateway.js";
+import { clearThinking, postIdeaCard, postQuestion, postThinking, say } from "../../gateways/slack/slack.gateway.js";
 import { saveState } from "../../repositories/state.repository.js";
 import { log, tid } from "../../shared/logger.js";
 import type { ChatMsg, ConvState } from "../../shared/types.js";
@@ -41,7 +41,13 @@ export async function runLoop(deps: AgentDeps, state: ConvState): Promise<void> 
       },
       ...state.history,
     ];
-    const assistant = await chatRound(messages, TOOLS);
+    const thinkingTs = await postThinking(client, state.channel, state.threadTs);
+    let assistant;
+    try {
+      assistant = await chatRound(messages, TOOLS);
+    } finally {
+      await clearThinking(client, state.channel, thinkingTs); // remove the loading message
+    }
     state.history.push(assistant as ChatMsg);
 
     const toolCalls = assistant.tool_calls ?? [];

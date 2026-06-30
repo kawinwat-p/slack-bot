@@ -11,7 +11,7 @@ import { chat } from "../../gateways/llm/llm.gateway.js";
 import { log } from "../../shared/logger.js";
 import type { ContextSummary } from "../../shared/types.js";
 
-const NO_PROMPT_PAGES = 1; // latest ~1000 messages only
+const MAX_MESSAGES = 1000; // latest 1000 messages, thread replies counted in
 
 function dumpRaw(channel: string, messages: string[]): void {
   const file = join(process.cwd(), ".state", `raw-${channel}.txt`);
@@ -25,7 +25,7 @@ export async function gatherContextText(
   channel: string,
   userPrompt: string,
 ): Promise<string> {
-  const messages = await getRecentMessages(client, channel, NO_PROMPT_PAGES);
+  const messages = await getRecentMessages(client, channel, MAX_MESSAGES);
   log("context.read", { channel, messages: messages.length });
   dumpRaw(channel, messages);
   return messages.join("\n");

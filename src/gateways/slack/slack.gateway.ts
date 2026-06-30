@@ -11,55 +11,54 @@ const MAX_PAGES = 50; // ponytail: ~50k-message ceiling so a giant channel can't
 
 // ---- READ ----
 
-/** Pull channel messages (paginated), oldest -> newest. maxPages bounds the fetch:
- *  1 page = latest ~1000 messages; default = the whole channel up to the ceiling. */
+/** True if a message has real content — emoji-only messages (`:heart:`, 😀) don't count. */
+export function isContentful(text: unknown): text is string {
+  if (typeof text !== "string") return false;
+  const stripped = text
+    .replace(/:[a-z0-9_'+-]+:/gi, "") // :shortcode: emoji
+    .replace(/\p{Extended_Pictographic}/gu, "") // unicode emoji
+    .trim();
+  return stripped.length > 0;
+}
+
+/** Latest `maxMessages` messages (parents + thread replies counted together), oldest ->
+ *  newest. Walks history newest-first, pulls each thread's replies, then keeps the most
+ *  recent maxMessages by timestamp.
+ *  ponytail: a recent reply on a thread whose parent is older than the fetched window is
+ *  missed, and a single huge thread's replies are all fetched before trimming — fine for
+ *  a 1000-message window; revisit if either bites. */
 export async function getRecentMessages(
   client: WebClient,
   channel: string,
-  maxPages = MAX_PAGES,
+  maxMessages = 1000,
 ): Promise<string[]> {
-  const texts: string[] = [];
-  const parentMessages: any[] = [];
+  const items: { ts: number; text: string }[] = [];
   let cursor: string | undefined;
   let pages = 0;
 
   do {
-    const res = await client.conversations.history({
-      channel,
-      limit: PAGE,
-      cursor,
-    });
-    parentMessages.push(...(res.messages ?? []));
+    const res = await client.conversations.history({ channel, limit: PAGE, cursor });
+    for (const m of res.messages ?? []) {
+      if (isContentful(m.text)) items.push({ ts: Number(m.ts), text: m.text });
+
+      if (m.ts && m.thread_ts === m.ts && m.reply_count && m.reply_count > 0) {
+        let threadCursor: string | undefined;
+        do {
+          const threadRes = await client.conversations.replies({ channel, ts: m.ts, limit: PAGE, cursor: threadCursor });
+          for (const reply of threadRes.messages?.slice(1) ?? []) {
+            // skip parent dup
+            if (isContentful(reply.text)) items.push({ ts: Number(reply.ts), text: reply.text });
+          }
+          threadCursor = threadRes.response_metadata?.next_cursor || undefined;
+        } while (threadCursor);
+      }
+    }
     cursor = res.response_metadata?.next_cursor || undefined;
     pages++;
-  } while (cursor && pages < maxPages);
-  if (cursor) log("context.read.capped", { channel, pages: maxPages }); // hit the ceiling, older msgs skipped
+  } while (cursor && pages < MAX_PAGES && items.length < maxMessages); // stop once we have enough
 
-  parentMessages.reverse(); // oldest -> newest
-
-  for (const m of parentMessages) {
-    if (typeof m.text === "string" && m.text.length > 0) texts.push(m.text);
-
-    if (m.thread_ts === m.ts && m.reply_count && m.reply_count > 0) {
-      let threadCursor: string | undefined;
-      do {
-        const threadRes = await client.conversations.replies({
-          channel,
-          ts: m.ts,
-          limit: PAGE,
-          cursor: threadCursor,
-        });
-        const replies = threadRes.messages?.slice(1) ?? []; // skip parent message duplicate
-        for (const reply of replies) {
-          if (typeof reply.text === "string" && reply.text.length > 0)
-            texts.push(reply.text);
-        }
-        threadCursor = threadRes.response_metadata?.next_cursor || undefined;
-      } while (threadCursor);
-    }
-  }
-
-  return texts;
+  items.sort((a, b) => a.ts - b.ts); // oldest -> newest
+  return items.slice(-maxMessages).map((i) => i.text); // keep the latest maxMessages
 }
 
 // ---- WRITE: plain ----
@@ -80,6 +79,27 @@ export async function postParent(
 ): Promise<string> {
   const res = await client.chat.postMessage({ channel, text });
   return res.ts as string;
+}
+
+// ---- WRITE: loading indicator ----
+
+/** Post a transient "thinking" message while the LLM runs. Returns its ts for clearing. */
+export async function postThinking(client: WebClient, channel: string, threadTs: string): Promise<string> {
+  const res = await client.chat.postMessage({
+    channel,
+    thread_ts: threadTs,
+    text: ":hourglass_flowing_sand: _thinking…_",
+  });
+  return res.ts as string;
+}
+
+/** Delete a thinking message (no-op if it's already gone). */
+export async function clearThinking(client: WebClient, channel: string, ts: string): Promise<void> {
+  try {
+    await client.chat.delete({ channel, ts });
+  } catch {
+    /* already deleted / race — ignore */
+  }
 }
 
 // ---- WRITE: Block Kit ----
