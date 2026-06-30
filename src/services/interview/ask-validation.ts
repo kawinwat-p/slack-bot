@@ -12,9 +12,10 @@ export function validateAskUser(
     pain?: { lastAnswerQuality?: unknown; status?: unknown };
   },
   state: ConvState,
-  notesAdvanced: boolean,
+  upsert: { notesAdvanced: boolean; newSlotFilled: boolean },
   lastUserAnswer: string,
 ): AskValidation {
+  const { notesAdvanced, newSlotFilled } = upsert;
   // Check 1 — recommendation present (pass-through for now; open questions trusted to prompt)
   const quick = args.quick_replies;
   if (Array.isArray(quick) && quick.length > 0) {
@@ -24,14 +25,14 @@ export function validateAskUser(
   const reportedQuality = parseAnswerQuality(args.pain?.lastAnswerQuality);
   const hasPriorAnswer = lastUserAnswer.trim().length > 0;
 
-  // Check 3 — thin may not advance or resolve
+  // Check 3 — thin may not open a new slot or resolve (refining an existing note is OK)
   if (hasPriorAnswer && reportedQuality === "thin") {
     const resolving = args.pain?.status === "resolved" || state.pains[state.currentPainIndex]?.status === "resolved";
-    if (resolving || notesAdvanced) {
+    if (resolving || newSlotFilled) {
       return {
         ok: false,
         reason:
-          "You marked the last answer 'thin'. Ask one more question on the same point before moving on or resolving.",
+          "You marked the last answer 'thin'. Ask one more question on the same point before opening a new aspect or resolving.",
       };
     }
   }
@@ -49,7 +50,8 @@ export function validateAskUser(
     };
   }
 
-  if (!notesAdvanced) {
+  const confirmed = reportedQuality === "substantive" || reportedQuality === "dont_know";
+  if (!notesAdvanced && !confirmed) {
     return {
       ok: false,
       reason: "Don't resolve yet: the last answer didn't add new detail — press once more before resolving.",

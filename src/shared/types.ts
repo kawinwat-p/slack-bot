@@ -36,6 +36,7 @@ export interface Pain {
   friction: string | null;
   who: string | null;
   howOften: string | null;
+  connectors: string | null;
   status: "drilling" | "resolved" | "deadend";
   /** # of ask_user turns actually posted against this pain. */
   drillCount: number;

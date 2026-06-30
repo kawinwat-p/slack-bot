@@ -22,7 +22,7 @@ export const TOOLS: ChatTool[] = [
         "Walk down ONE branch at a time, resolving dependencies between decisions before moving on. Never ask generic " +
         "questions — every question must cite observed context or a prior answer. If the codebase/context already answers " +
         "something, fill it in pain and don't ask. " +
-        "Update pain with whatever you've learned (the trigger/friction/who/howOften fields are free-form notes, not a checklist). " +
+        "Update pain with whatever you've learned (the trigger/friction/who/howOften/connectors fields are free-form notes, not a checklist). " +
         "Set pain.status to resolved once understanding is shared, or deadend if the pain is irrelevant.",
       parameters: {
         type: "object",
@@ -42,6 +42,12 @@ export const TOOLS: ChatTool[] = [
               friction: { type: "string", description: "(optional note) What goes wrong or wastes time." },
               who: { type: "string", description: "(optional note) Who is affected." },
               howOften: { type: "string", description: "(optional note) How often it happens." },
+              connectors: {
+                type: "string",
+                description:
+                  "(optional note) Systems this pain touches and HOW — how a signal is detected, and how an action reaches its target. " +
+                  "Record what's stated or obvious; leave the unknown half for your next question.",
+              },
               status: {
                 type: "string",
                 enum: ["drilling", "resolved", "deadend"],
@@ -133,6 +139,7 @@ function sectionInterviewMethod(): string {
     "- Follow up on vague or surprising answers — don't accept a hand-wave; dig until the branch is actually resolved.",
     "- Never ask a generic question. Every question must cite observed context or something the user just said.",
     "- If context or the codebase already answers something, record it in pain and don't ask.",
+    "- Systems / connectors: when a pain implies a system interaction whose mechanism is still unknown — how a signal is noticed, or how an action reaches its target — ask that as your next grounded question and record what you learn in pain.connectors. Examples: \"Claude tokens running out\" → ask how they know; \"contact HR\" → ask Slack vs email vs form; \"deploy bot already posts to #releases\" → don't ask, record Slack.",
     `- Max ${MAX_PAINS} pains per session. Open pain #2 only after pain #1 is resolved or deadend.`,
     "- Mark pain.status resolved the moment understanding is shared; deadend if it turns out irrelevant.",
     "- Call propose_ideas once at least one pain is resolved (or the question budget is nearly exhausted).",
@@ -181,7 +188,7 @@ function sectionPainState(pains: Pain[], currentIndex: number): string {
     const marker = i === currentIndex ? " ← CURRENT" : "";
     lines.push(
       `Pain ${i + 1}${marker}: "${p.topic}" [${p.status}]`,
-      `  what you know so far — trigger: ${slotLabel(p.trigger)} | friction: ${slotLabel(p.friction)} | who: ${slotLabel(p.who)} | howOften: ${slotLabel(p.howOften)}`,
+      `  what you know so far — trigger: ${slotLabel(p.trigger)} | friction: ${slotLabel(p.friction)} | who: ${slotLabel(p.who)} | howOften: ${slotLabel(p.howOften)} | connectors: ${slotLabel(p.connectors ?? null)}`,
     );
     if (p.lastAnswerQuality && i === currentIndex) {
       lines.push(`  last answer quality: ${p.lastAnswerQuality}`);

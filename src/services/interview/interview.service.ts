@@ -64,7 +64,7 @@ export async function runLoop(deps: AgentDeps, state: ConvState): Promise<void> 
     if (primary.function.name === "ask_user") {
       const painSnapshot = structuredClone(state.pains);
       const painIndexSnapshot = state.currentPainIndex;
-      const notesAdvanced = upsertPain(state, args.pain);
+      const upsert = upsertPain(state, args.pain);
 
       if (state.forceProposed) {
         log("loop.forceProposed", { thread: T });
@@ -82,7 +82,7 @@ export async function runLoop(deps: AgentDeps, state: ConvState): Promise<void> 
       }
 
       const lastUserAnswer = state.lastUserAnswer ?? "";
-      const v = validateAskUser(args, state, notesAdvanced, lastUserAnswer);
+      const v = validateAskUser(args, state, upsert, lastUserAnswer);
       if (!v.ok) {
         state.pains = painSnapshot;
         state.currentPainIndex = painIndexSnapshot;
