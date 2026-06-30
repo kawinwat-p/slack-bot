@@ -13,30 +13,71 @@ const MAX_PAGES = 50; // ponytail: ~50k-message ceiling so a giant channel can't
 
 /** Pull channel messages (paginated), oldest -> newest. maxPages bounds the fetch:
  *  1 page = latest ~1000 messages; default = the whole channel up to the ceiling. */
-export async function getRecentMessages(client: WebClient, channel: string, maxPages = MAX_PAGES): Promise<string[]> {
+export async function getRecentMessages(
+  client: WebClient,
+  channel: string,
+  maxPages = MAX_PAGES,
+): Promise<string[]> {
   const texts: string[] = [];
+  const parentMessages: any[] = [];
   let cursor: string | undefined;
   let pages = 0;
+
   do {
-    const res = await client.conversations.history({ channel, limit: PAGE, cursor });
-    for (const m of res.messages ?? []) {
-      if (typeof m.text === "string" && m.text.length > 0) texts.push(m.text);
-    }
+    const res = await client.conversations.history({
+      channel,
+      limit: PAGE,
+      cursor,
+    });
+    parentMessages.push(...(res.messages ?? []));
     cursor = res.response_metadata?.next_cursor || undefined;
     pages++;
   } while (cursor && pages < maxPages);
   if (cursor) log("context.read.capped", { channel, pages: maxPages }); // hit the ceiling, older msgs skipped
-  texts.reverse(); // pages came newest-first; flip the whole list to oldest -> newest
+
+  parentMessages.reverse(); // oldest -> newest
+
+  for (const m of parentMessages) {
+    if (typeof m.text === "string" && m.text.length > 0) texts.push(m.text);
+
+    if (m.thread_ts === m.ts && m.reply_count && m.reply_count > 0) {
+      let threadCursor: string | undefined;
+      do {
+        const threadRes = await client.conversations.replies({
+          channel,
+          ts: m.ts,
+          limit: PAGE,
+          cursor: threadCursor,
+        });
+        const replies = threadRes.messages?.slice(1) ?? []; // skip parent message duplicate
+        for (const reply of replies) {
+          if (typeof reply.text === "string" && reply.text.length > 0)
+            texts.push(reply.text);
+        }
+        threadCursor = threadRes.response_metadata?.next_cursor || undefined;
+      } while (threadCursor);
+    }
+  }
+
   return texts;
 }
 
 // ---- WRITE: plain ----
 
-export async function say(client: WebClient, channel: string, threadTs: string, text: string): Promise<void> {
+export async function say(
+  client: WebClient,
+  channel: string,
+  threadTs: string,
+  text: string,
+): Promise<void> {
   await client.chat.postMessage({ channel, thread_ts: threadTs, text });
 }
 
-export async function postParent(client: WebClient, channel: string, text: string): Promise<string> {
+export async function postParent(
+  client: WebClient,
+  channel: string,
+  text: string,
+): Promise<string> {
   const res = await client.chat.postMessage({ channel, text });
   return res.ts as string;
 }
@@ -105,9 +146,25 @@ export async function postIdeaCard(
       {
         type: "actions",
         elements: [
-          { type: "button", style: "primary", text: { type: "plain_text", text: "👍 Build this" }, value: idea.id, action_id: "build_idea" },
-          { type: "button", text: { type: "plain_text", text: "✏️ Refine" }, value: idea.id, action_id: "refine_idea" },
-          { type: "button", text: { type: "plain_text", text: "👎 Not it" }, value: idea.id, action_id: "reject_idea" },
+          {
+            type: "button",
+            style: "primary",
+            text: { type: "plain_text", text: "👍 Build this" },
+            value: idea.id,
+            action_id: "build_idea",
+          },
+          {
+            type: "button",
+            text: { type: "plain_text", text: "✏️ Refine" },
+            value: idea.id,
+            action_id: "refine_idea",
+          },
+          {
+            type: "button",
+            text: { type: "plain_text", text: "👎 Not it" },
+            value: idea.id,
+            action_id: "reject_idea",
+          },
         ],
       },
     ],
@@ -116,9 +173,17 @@ export async function postIdeaCard(
 
 // ---- WRITE: real side effects (build) ----
 
-export async function createCanvas(client: WebClient, title: string, markdown: string): Promise<string> {
+export async function createCanvas(
+  client: WebClient,
+  title: string,
+  markdown: string,
+): Promise<string> {
   // canvases API exists at runtime; Slack SDK types may lag behind manifest scopes
-  const res = await (client as WebClient & { canvases: { create: (args: unknown) => Promise<{ canvas_id?: string }> } }).canvases.create({
+  const res = await (
+    client as WebClient & {
+      canvases: { create: (args: unknown) => Promise<{ canvas_id?: string }> };
+    }
+  ).canvases.create({
     title,
     document_content: { type: "markdown", markdown },
   });

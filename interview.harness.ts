@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Harness — drive runLoop with fake chat() and stub Slack client.
  * No real Slack/OpenRouter.
  */
@@ -329,6 +329,7 @@ function proposeCall(id: string) {
         friction: null,
         who: null,
         howOften: null,
+        connectors: null,
         status: "drilling",
         drillCount: 1,
       },
@@ -452,6 +453,7 @@ function proposeCall(id: string) {
         friction: null,
         who: null,
         howOften: null,
+        connectors: null,
         status: "drilling",
         drillCount: 3,
       },
@@ -563,6 +565,7 @@ function proposeCall(id: string) {
         friction: "manual announces",
         who: null,
         howOften: null,
+        connectors: null,
         status: "resolved",
         drillCount: 2,
       },
@@ -614,3 +617,4 @@ function proposeCall(id: string) {
 
 console.log(`harness PASS ${pass} FAIL ${fail}`);
 process.exit(fail ? 1 : 0);
+
