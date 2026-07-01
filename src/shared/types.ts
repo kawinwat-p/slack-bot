@@ -6,26 +6,28 @@ import type OpenAI from "openai";
 export type ChatMsg = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 export type ChatTool = OpenAI.Chat.Completions.ChatCompletionTool;
 
-/** A single proposed workflow idea. Free-form — no fixed building-block catalog. */
-export interface Idea {
-  id: string;
-  title: string;
-  problem: string;
-  /** REQUIRED, non-empty: the observed signal that motivates this idea. */
-  triggeringEvidence: string;
-  trigger: string;
-  steps: string[];
-  effort: "S" | "M" | "L";
-}
-
 /** Three-part distillation of channel history by the summarize pre-pass. */
 export interface ContextSummary {
   tools: string[]; // tools/services the company uses, as named in chat
   summary: string; // what the channel is about
   painPoints: string[]; // recurring friction the team hits
+  connectors: string[]; // flat list of integration points a workflow might touch
 }
 
-export type Phase = "interview" | "propose" | "done";
+/** Generated workflow spec — deliverable is markdown uploaded to Slack. */
+export interface WorkflowSpec {
+  id: string;
+  slug: string; // kebab-case, used for uploaded filename {slug}.md
+  title: string;
+  markdown: string; // full spec — free-form, loop-me bar; source of truth
+  triggeringEvidence: string; // grounding, non-empty
+  briefBullets: string[]; // 3–5 decision-ready bullets for Block Kit brief
+  triggerSummary?: string;
+  checkpointSummary?: string;
+  connectorsUsed: string[];
+}
+
+export type Phase = "interview" | "generate" | "review" | "done";
 
 export type AnswerQuality = "substantive" | "thin" | "dont_know";
 
@@ -44,6 +46,11 @@ export interface Pain {
   lastAnswerQuality?: AnswerQuality;
 }
 
+export type PendingInterrupt =
+  | { kind: "ask_user"; toolCallId: string; otherIds: string[] }
+  | { kind: "review_workflow"; specId: string }
+  | { kind: "refine"; specId: string };
+
 /** Persisted, re-entrant conversation state, keyed by thread_ts. */
 export interface ConvState {
   threadTs: string;
@@ -53,7 +60,6 @@ export interface ConvState {
   context?: ContextSummary;
   history: ChatMsg[];
   questionsAsked: number;
-  proposedIdeas: Idea[];
   pending?: PendingInterrupt;
   /** Accumulated pains as the agent drills (max 2 per session). */
   pains: Pain[];
@@ -63,6 +69,8 @@ export interface ConvState {
   forceProposed: boolean;
   /** Latest user reply from answerPending (for answer-quality validation). */
   lastUserAnswer?: string;
+  /** Latest generated workflow draft. */
+  currentSpec?: WorkflowSpec;
+  /** ts of the in-place progress status message. */
+  statusTs?: string;
 }
-
-export type PendingInterrupt = { kind: "ask_user"; toolCallId: string; otherIds: string[] };

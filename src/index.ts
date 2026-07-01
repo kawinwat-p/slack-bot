@@ -4,11 +4,16 @@ import "dotenv/config";
 import pkg from "@slack/bolt";
 const { App } = pkg;
 import { registerHandlers } from "./gateways/slack/slack.handlers.js";
+import { initStateStore, closeStateStore } from "./repositories/state.repository.js";
+import { loadConfig } from "./shared/config.js";
+
+const config = loadConfig();
+initStateStore(config.stateDbPath);
 
 const app = new App({
-  token: process.env.SLACK_BOT_TOKEN,
-  appToken: process.env.SLACK_APP_TOKEN,
-  signingSecret: process.env.SLACK_SIGNING_SECRET,
+  token: config.slackBotToken,
+  appToken: config.slackAppToken,
+  signingSecret: config.slackSigningSecret,
   socketMode: true,
 });
 
@@ -21,6 +26,7 @@ async function shutdown(signal: string): Promise<void> {
   console.log(`${signal} received — closing Slack connection…`);
   try {
     await app.stop();
+    closeStateStore();
   } catch (err) {
     console.error("Shutdown error:", err);
   }

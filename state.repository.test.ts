@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { importJsonStateIfEmpty } from "./src/repositories/state.importer.js";
-import { getStateDbForTests, initStateStore, loadState, saveState, closeStateStore } from "./src/repositories/state.repository.js";
+import { getStateDbForTests, initStateStore, loadState, saveState, closeStateStore, deleteState } from "./src/repositories/state.repository.js";
 import type { ConvState } from "./src/shared/types.js";
 
 let pass = 0;
@@ -19,7 +19,6 @@ function baseState(overrides: Partial<ConvState> = {}): ConvState {
     phase: "interview",
     history: [{ role: "user", content: "Begin." }],
     questionsAsked: 1,
-    proposedIdeas: [],
     pains: [],
     currentPainIndex: 0,
     forceProposed: false,
@@ -99,6 +98,16 @@ withTempStore((legacyDir) => {
   const imported = importJsonStateIfEmpty(getStateDbForTests(), legacyDir);
   ok(imported === 0, "importer skips when DB non-empty");
   ok(loadState("9999999999.000001") === undefined, "legacy file not imported into non-empty DB");
+});
+
+// --- deleteState ---
+
+withTempStore(() => {
+  const state = baseState();
+  saveState(state);
+  ok(loadState(state.threadTs) !== undefined, "deleteState: row exists before delete");
+  deleteState(state.threadTs);
+  ok(loadState(state.threadTs) === undefined, "deleteState: row removed after delete");
 });
 
 console.log(`\nstate.repository: ${pass} passed, ${fail} failed`);

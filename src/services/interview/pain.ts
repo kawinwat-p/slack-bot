@@ -172,11 +172,14 @@ export function autoDeadendIncompletePains(state: ConvState): void {
   }
 }
 
-/** Default missing pain fields for state loaded from older JSON files. */
+/** Default missing fields for state loaded from older JSON files. */
 export function normalizeState(state: ConvState): ConvState {
   state.pains ??= [];
   state.currentPainIndex ??= 0;
   state.forceProposed ??= false;
+  if (state.context) {
+    state.context.connectors ??= [];
+  }
   for (const pain of state.pains) {
     pain.drillCount ??= 0;
   }
