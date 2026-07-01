@@ -1,13 +1,13 @@
 # Slack app manifest — paste into api.slack.com/apps "From an app manifest".
 display_information:
-  name: Workflow Ideas Bot Achi
+  name: Workflow Ideas Bot
   description: Deep-interviews you from real channel context and generates buildable workflow specs.
 features:
   bot_user:
-    display_name: workflow-ideas-achi
+    display_name: workflow-ideas
     always_online: true
   slash_commands:
-    - command: /workflow-ideas-achi
+    - command: /workflow-ideas
       description: Generate a buildable workflow spec for this channel
       should_escape: false
 oauth_config:

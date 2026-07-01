@@ -71,6 +71,4 @@ export interface ConvState {
   lastUserAnswer?: string;
   /** Latest generated workflow draft. */
   currentSpec?: WorkflowSpec;
-  /** ts of the in-place progress status message. */
-  statusTs?: string;
 }
