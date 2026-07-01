@@ -3,7 +3,7 @@
 // service จะเรียกผ่าน gateway นี้ ไม่แตะ WebClient ตรง ๆ
 
 import type { WebClient } from "@slack/web-api";
-import type { ConvState, WorkflowSpec } from "../../shared/types.js";
+import type { WorkflowSpec } from "../../shared/types.js";
 import { log } from "../../shared/logger.js";
 
 const PAGE = 1000; // Slack max per page
@@ -83,23 +83,65 @@ export async function postParent(
 
 // ---- WRITE: loading indicator ----
 
-/** Post a transient "thinking" message while the LLM runs. Returns its ts for clearing. */
-export async function postThinking(client: WebClient, channel: string, threadTs: string): Promise<string> {
-  const res = await client.chat.postMessage({
-    channel,
-    thread_ts: threadTs,
-    text: ":hourglass_flowing_sand: _thinking…_",
-  });
-  return res.ts as string;
+const INTERVIEW_LOADING_MESSAGES = [
+  "Reading your answer…",
+  "Preparing the next question…",
+  "Checking what we know so far…",
+];
+
+const GENERATE_LOADING_MESSAGES = [
+  "Drafting the workflow spec…",
+  "Structuring triggers and steps…",
+  "Checking connectors…",
+];
+
+const REVISE_LOADING_MESSAGES = [
+  "Applying your feedback…",
+  "Revising triggers and steps…",
+  "Updating the workflow spec…",
+];
+
+/** Native Slack typing indicator — no thread message, no notification ping. */
+export async function setThreadStatus(
+  client: WebClient,
+  channel: string,
+  threadTs: string,
+  status = "is thinking…",
+  loadingMessages: string[] = INTERVIEW_LOADING_MESSAGES,
+): Promise<void> {
+  try {
+    await client.assistant.threads.setStatus({
+      channel_id: channel,
+      thread_ts: threadTs,
+      status,
+      loading_messages: loadingMessages,
+    });
+  } catch (err) {
+    log("slack.status.set.fail", { err: String(err) });
+  }
 }
 
-/** Delete a thinking message (no-op if it's already gone). */
-export async function clearThinking(client: WebClient, channel: string, ts: string): Promise<void> {
+/** Clear the typing indicator without posting a message. */
+export async function clearThreadStatus(
+  client: WebClient,
+  channel: string,
+  threadTs: string,
+): Promise<void> {
   try {
-    await client.chat.delete({ channel, ts });
+    await client.assistant.threads.setStatus({
+      channel_id: channel,
+      thread_ts: threadTs,
+      status: "",
+    });
   } catch {
-    /* already deleted / race — ignore */
+    /* already cleared / unsupported — ignore */
   }
+}
+
+export function generateStatusMessages(refining: boolean): { status: string; loadingMessages: string[] } {
+  return refining
+    ? { status: "is revising your workflow…", loadingMessages: REVISE_LOADING_MESSAGES }
+    : { status: "is drafting your workflow…", loadingMessages: GENERATE_LOADING_MESSAGES };
 }
 
 // ---- WRITE: Block Kit ----
@@ -141,33 +183,6 @@ export async function postQuestion(
       { type: "actions", elements: buttons },
     ],
   });
-}
-
-// ---- WRITE: in-place status (generate/refine progress) ----
-
-/** Post or update a single status message in the thread (UX-Q1 B). */
-export async function updateStatusInPlace(
-  client: WebClient,
-  state: ConvState,
-  text: string,
-): Promise<void> {
-  if (state.statusTs) {
-    await client.chat.update({ channel: state.channel, ts: state.statusTs, text });
-  } else {
-    const res = await client.chat.postMessage({
-      channel: state.channel,
-      thread_ts: state.threadTs,
-      text,
-    });
-    state.statusTs = res.ts as string;
-  }
-}
-
-/** Remove the status message when generate completes. */
-export async function clearStatusMessage(client: WebClient, state: ConvState): Promise<void> {
-  if (!state.statusTs) return;
-  await clearThinking(client, state.channel, state.statusTs);
-  state.statusTs = undefined;
 }
 
 // ---- WRITE: workflow brief + file ----

@@ -3,9 +3,10 @@
 import type { WebClient } from "@slack/web-api";
 import { chat } from "../../gateways/llm/llm.gateway.js";
 import {
-  clearStatusMessage,
+  clearThreadStatus,
+  generateStatusMessages,
   postBrief,
-  updateStatusInPlace,
+  setThreadStatus,
   uploadWorkflowFile,
 } from "../../gateways/slack/slack.gateway.js";
 import { saveState } from "../../repositories/state.repository.js";
@@ -39,11 +40,11 @@ export async function runGenerate(
 ): Promise<void> {
   const { client } = deps;
   const T = tid(state.threadTs);
-  const statusText = refineFeedback ? "Revising workflow…" : "Drafting workflow…";
+  const { status, loadingMessages } = generateStatusMessages(!!refineFeedback);
 
   log("generate.start", { thread: T, refine: !!refineFeedback });
   state.phase = "generate";
-  await updateStatusInPlace(client, state, `:hourglass_flowing_sand: _${statusText}_`);
+  await setThreadStatus(client, state.channel, state.threadTs, status, loadingMessages);
   saveState(state);
 
   let spec: WorkflowSpec;
@@ -55,7 +56,7 @@ export async function runGenerate(
       spec = coerceSpec(args ?? {});
     }
   } catch (err) {
-    await clearStatusMessage(client, state);
+    await clearThreadStatus(client, state.channel, state.threadTs);
     saveState(state);
     throw err;
   }
@@ -65,7 +66,7 @@ export async function runGenerate(
 
   await postBrief(client, state.channel, state.threadTs, spec);
   await uploadWorkflowFile(client, state.channel, state.threadTs, spec);
-  await clearStatusMessage(client, state);
+  await clearThreadStatus(client, state.channel, state.threadTs);
 
   state.phase = "review";
   state.pending = { kind: "review_workflow", specId: spec.id };
