@@ -4,6 +4,15 @@
  */
 process.env.OPENROUTER_API_KEY ??= "test-key-for-harness";
 
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { initStateStore, closeStateStore } from "./src/repositories/state.repository.js";
+
+const harnessStoreRoot = mkdtempSync(join(tmpdir(), "harness-state-"));
+const harnessDbPath = join(harnessStoreRoot, "test.db");
+initStateStore(harnessDbPath);
+
 const { runLoop } = await import("./src/services/interview/interview.service.js");
 import type { AgentDeps } from "./src/services/interview/interview.service.js";
 import type { ConvState, ContextSummary } from "./src/shared/types.js";
@@ -21,6 +30,7 @@ const context: ContextSummary = {
   tools: ["GitHub"],
   summary: "Engineering channel",
   painPoints: ["manual deploy announcements"],
+  connectors: ["Slack", "GitHub"],
 };
 
 function baseState(overrides: Partial<ConvState> = {}): ConvState {
@@ -32,7 +42,6 @@ function baseState(overrides: Partial<ConvState> = {}): ConvState {
     context,
     history: [{ role: "user", content: "Begin." }],
     questionsAsked: 0,
-    proposedIdeas: [],
     pains: [],
     currentPainIndex: 0,
     forceProposed: false,
@@ -41,14 +50,22 @@ function baseState(overrides: Partial<ConvState> = {}): ConvState {
 }
 
 const postedTexts: string[] = [];
+let statusTs = "status-1";
 const mockClient = {
   chat: {
-    postMessage: async (opts: { text?: string }) => {
+    postMessage: async (opts: { text?: string; thread_ts?: string }) => {
       if (opts.text) postedTexts.push(opts.text);
-      return { ts: "123", ok: true };
+      return { ts: opts.thread_ts ? "reply-ts" : statusTs, ok: true };
     },
+    update: async (opts: { text?: string }) => {
+      if (opts.text) postedTexts.push(opts.text);
+      return { ok: true };
+    },
+    delete: async () => ({ ok: true }),
   },
-  canvases: { create: async () => ({ canvas_id: "c1" }) },
+  files: {
+    uploadV2: async () => ({ ok: true }),
+  },
 } as AgentDeps["client"];
 
 function askUserCall(
@@ -101,7 +118,7 @@ function textReplyCall(content: string | null) {
   } satisfies ChatCompletionMessage;
 }
 
-function proposeCall(id: string) {
+function generateWorkflowCall(id: string) {
   return {
     role: "assistant" as const,
     content: null,
@@ -110,18 +127,16 @@ function proposeCall(id: string) {
         id,
         type: "function" as const,
         function: {
-          name: "propose_ideas",
+          name: "generate_workflow",
           arguments: JSON.stringify({
-            ideas: [
-              {
-                title: "Auto deploy note",
-                problem: "Manual announces",
-                triggeringEvidence: "saw 15 manual deploy msgs",
-                trigger: "on deploy",
-                steps: ["post to channel"],
-                effort: "S",
-              },
-            ],
+            title: "Auto deploy note",
+            slug: "auto-deploy-note",
+            triggeringEvidence: "saw 15 manual deploy msgs",
+            markdown: "# Auto deploy note\n\n## Trigger\nOn deploy…",
+            briefBullets: ["Watch deploys", "Post to channel"],
+            triggerSummary: "On deploy",
+            checkpointSummary: "Autonomous — no checkpoint",
+            connectorsUsed: ["Slack"],
           }),
         },
       },
@@ -148,19 +163,19 @@ function proposeCall(id: string) {
   const chatFn: AgentDeps["chatFn"] = async (messages) => {
     const last = messages[messages.length - 1];
     if (last && "role" in last && last.role === "tool") {
-      return proposeCall("tc2");
+      return generateWorkflowCall("tc2");
     }
     return askUserCall("tc1", "Should not post?", { topic: "x" });
   };
 
   await runLoop({ client: mockClient, chatFn }, state);
-  ok(state.pending === undefined, "harness: forceProposed no suspend");
+  ok(state.pending?.kind !== "ask_user", "harness: forceProposed no ask_user suspend");
   ok(state.questionsAsked === 0, "harness: forceProposed never posts question");
-  ok(state.phase === "done", "harness: forceProposed reaches propose");
-  ok(state.proposedIdeas.length === 1, "harness: idea posted");
+  ok(state.phase === "review", "harness: forceProposed reaches generate");
+  ok(state.currentSpec?.title === "Auto deploy note", "harness: workflow spec generated");
 }
 
-// --- propose_ideas completes (resolved pain with impact) ---
+// --- generate_workflow completes (resolved pain with impact) ---
 {
   const state = baseState({
     pains: [
@@ -170,16 +185,18 @@ function proposeCall(id: string) {
         friction: "manual announces",
         who: null,
         howOften: null,
+        connectors: null,
         status: "resolved",
         drillCount: 2,
       },
     ],
   });
-  const chatFn: AgentDeps["chatFn"] = async () => proposeCall("tc3");
+  const chatFn: AgentDeps["chatFn"] = async () => generateWorkflowCall("tc3");
 
   await runLoop({ client: mockClient, chatFn }, state);
-  ok(state.phase === "done", "harness: propose sets done");
-  ok(state.proposedIdeas.length === 1, "harness: propose adds idea");
+  ok(state.phase === "review", "harness: generate sets review");
+  ok(state.currentSpec?.title === "Auto deploy note", "harness: generate adds spec");
+  ok(state.pending?.kind === "review_workflow", "harness: pending review_workflow");
 }
 
 // --- enforcement: resolved after 1 drill rejected ---
@@ -443,7 +460,7 @@ function proposeCall(id: string) {
   ok(state.pending?.kind === "ask_user", "quality: substantive suspends");
 }
 
-// --- quality: propose while drilling rejected ---
+// --- quality: generate while drilling rejected ---
 {
   const state = baseState({
     pains: [
@@ -460,14 +477,14 @@ function proposeCall(id: string) {
     ],
     questionsAsked: 3,
   });
-  const chatFn: AgentDeps["chatFn"] = async () => proposeCall("tc-q6");
+  const chatFn: AgentDeps["chatFn"] = async () => generateWorkflowCall("tc-q6");
 
   await runLoop({ client: mockClient, chatFn }, state);
-  ok(state.proposedIdeas.length === 0, "quality: drilling propose no ideas");
-  ok(lastToolResult(state)?.includes("resolved pain"), "quality: drilling propose reason");
+  ok(!state.currentSpec, "quality: drilling generate no spec");
+  ok(lastToolResult(state)?.includes("resolved pain"), "quality: drilling generate reason");
 }
 
-// --- quality: propose with resolved + friction proceeds ---
+// --- quality: generate with resolved + friction proceeds ---
 {
   const state = baseState({
     pains: [
@@ -477,20 +494,21 @@ function proposeCall(id: string) {
         friction: "manual announce",
         who: "eng",
         howOften: null,
+        connectors: null,
         status: "resolved",
         drillCount: 3,
       },
     ],
     questionsAsked: 3,
   });
-  const chatFn: AgentDeps["chatFn"] = async () => proposeCall("tc-q7");
+  const chatFn: AgentDeps["chatFn"] = async () => generateWorkflowCall("tc-q7");
 
   await runLoop({ client: mockClient, chatFn }, state);
-  ok(state.phase === "done", "quality: resolved propose done");
-  ok(state.proposedIdeas.length === 1, "quality: resolved propose posts idea");
+  ok(state.phase === "review", "quality: resolved generate review");
+  ok(state.currentSpec?.title === "Auto deploy note", "quality: resolved generate posts spec");
 }
 
-// --- quality: deadend no impact propose rejected ---
+// --- quality: deadend no impact generate rejected ---
 {
   const state = baseState({
     pains: [
@@ -500,16 +518,17 @@ function proposeCall(id: string) {
         friction: null,
         who: null,
         howOften: null,
+        connectors: null,
         status: "deadend",
         drillCount: 2,
       },
     ],
     questionsAsked: 2,
   });
-  const chatFn: AgentDeps["chatFn"] = async () => proposeCall("tc-q8");
+  const chatFn: AgentDeps["chatFn"] = async () => generateWorkflowCall("tc-q8");
 
   await runLoop({ client: mockClient, chatFn }, state);
-  ok(state.proposedIdeas.length === 0, "quality: deadend no impact no ideas");
+  ok(!state.currentSpec, "quality: deadend no impact no spec");
   ok(lastToolResult(state)?.includes("worth solving"), "quality: deadend no impact reason");
 }
 
@@ -554,7 +573,7 @@ function proposeCall(id: string) {
   ok(!postedTexts.some((t) => t.includes("should not be posted")), "text-reply: text then ask_user no prose");
 }
 
-// --- text-reply recovery: text then propose_ideas ---
+// --- text-reply recovery: text then generate_workflow ---
 {
   postedTexts.length = 0;
   const state = baseState({
@@ -575,13 +594,13 @@ function proposeCall(id: string) {
   const chatFn: AgentDeps["chatFn"] = async () => {
     calls++;
     if (calls === 1) return textReplyCall("Here are some ideas...");
-    return proposeCall("tc-t3");
+    return generateWorkflowCall("tc-t3");
   };
 
   await runLoop({ client: mockClient, chatFn }, state);
-  ok(state.phase === "done", "text-reply: text then propose done");
-  ok(state.proposedIdeas.length === 1, "text-reply: text then propose posts idea");
-  ok(!postedTexts.some((t) => t.includes("Here are some ideas")), "text-reply: text then propose no prose");
+  ok(state.phase === "review", "text-reply: text then generate review");
+  ok(state.currentSpec?.title === "Auto deploy note", "text-reply: text then generate posts spec");
+  ok(!postedTexts.some((t) => t.includes("Here are some ideas")), "text-reply: text then generate no prose");
 }
 
 // --- text-reply recovery: text every iteration hits regroup ---
@@ -616,5 +635,7 @@ function proposeCall(id: string) {
 }
 
 console.log(`harness PASS ${pass} FAIL ${fail}`);
+closeStateStore();
+rmSync(harnessStoreRoot, { recursive: true, force: true });
 process.exit(fail ? 1 : 0);
 

@@ -1,4 +1,4 @@
-import { validateIdeas } from "./src/services/ideas/ideas.service.js";
+import { coerceSpec, SpecValidationError } from "./src/services/workflow/coerce-spec.js";
 import { isContentful } from "./src/gateways/slack/slack.gateway.js";
 import {
   getLastUserAnswer,
@@ -29,7 +29,6 @@ function baseState(overrides: Partial<ConvState> = {}): ConvState {
     phase: "interview",
     history: [],
     questionsAsked: 0,
-    proposedIdeas: [],
     pains: [],
     currentPainIndex: 0,
     forceProposed: false,
@@ -66,45 +65,37 @@ ok(!isContentful("   "), "whitespace excluded");
 ok(isContentful("staging ล่มอีกแล้ว :weary:"), "text + emoji kept");
 ok(isContentful("deploy v2.3.1"), "plain text kept");
 
-// --- validateIdeas ---
-const good = [
-  {
-    title: "t",
-    problem: "p",
-    triggeringEvidence: "saw 15 msgs",
-    trigger: "tr",
-    steps: ["s"],
-    effort: "S",
-  },
-];
-ok(validateIdeas(good).valid.length === 1, "complete idea passes");
+// --- coerceSpec ---
+const goodSpec = {
+  title: "Deploy notifier",
+  slug: "deploy-notifier",
+  triggeringEvidence: "saw 15 msgs",
+  markdown: "# Deploy notifier\n\nSteps…",
+  briefBullets: ["Watch deploys", "Post to channel"],
+  connectorsUsed: ["Slack"],
+};
+ok(coerceSpec(goodSpec).title === "Deploy notifier", "complete spec passes");
 
-const noEvidence = [
-  {
-    title: "t",
-    problem: "p",
-    triggeringEvidence: "",
-    trigger: "tr",
-    steps: ["s"],
-    effort: "S",
-  },
-];
-ok(validateIdeas(noEvidence).valid.length === 0, "empty evidence rejected");
+try {
+  coerceSpec({ ...goodSpec, triggeringEvidence: "" });
+  ok(false, "empty evidence should throw");
+} catch (e) {
+  ok(e instanceof SpecValidationError, "empty evidence rejected");
+}
 
-const noSteps = [
-  {
-    title: "t",
-    problem: "p",
-    triggeringEvidence: "x",
-    trigger: "tr",
-    steps: [],
-    effort: "S",
-  },
-];
-ok(validateIdeas(noSteps).valid.length === 0, "no steps rejected");
+try {
+  coerceSpec({ ...goodSpec, briefBullets: [] });
+  ok(false, "empty briefBullets should throw");
+} catch (e) {
+  ok(e instanceof SpecValidationError, "empty briefBullets rejected");
+}
 
-const missing = [{ title: "t", steps: ["s"], effort: "S" }];
-ok(validateIdeas(missing).valid.length === 0, "missing fields rejected");
+try {
+  coerceSpec({ title: "t" });
+  ok(false, "missing fields should throw");
+} catch (e) {
+  ok(e instanceof SpecValidationError, "missing fields rejected");
+}
 
 function upsertFlags(notesAdvanced: boolean, newSlotFilled = notesAdvanced) {
   return { notesAdvanced, newSlotFilled };
@@ -588,7 +579,6 @@ function upsertFlags(notesAdvanced: boolean, newSlotFilled = notesAdvanced) {
     phase: "interview",
     history: [],
     questionsAsked: 0,
-    proposedIdeas: [],
   } as ConvState;
   legacy.pains = [
     {
