@@ -1,5 +1,5 @@
-// System prompt + tool schemas for the interview/propose agent loop (OpenAI format).
-// Choosing ask_user continues the interview; choosing propose_ideas IS the "I'm
+// System prompt + tool schemas for the interview/generate agent loop (OpenAI format).
+// Choosing ask_user continues the interview; choosing generate_workflow IS the "I'm
 // confident now" decision (termination = a tool choice).
 
 import type { ChatTool, ContextSummary, Pain } from "../../shared/types.js";
@@ -70,31 +70,43 @@ export const TOOLS: ChatTool[] = [
   {
     type: "function",
     function: {
-      name: "propose_ideas",
+      name: "generate_workflow",
       description:
-        "Stop interviewing and propose 2-4 concrete workflow ideas tied to observed pains. " +
-        "Call when you can name a specific pain with enough detail to propose well, " +
-        "or when the question budget is exhausted. Every idea needs non-empty triggeringEvidence.",
+        "Stop interviewing and generate ONE complete workflow spec for the pain you now understand. " +
+        "Call this once at least one pain is resolved (or the question budget is exhausted). " +
+        "Apply the loop-me bar: an implementer could build this WITHOUT asking a single question. " +
+        "Use loop-me vocabulary (Trigger, Checkpoint, Push right, Brief) only when the workflow " +
+        "calls for them — no AI, no checkpoint, and no schedule are fine if the grilling shows so.",
       parameters: {
         type: "object",
         properties: {
-          ideas: {
+          title: { type: "string" },
+          slug: { type: "string", description: "kebab-case filename stem for the uploaded .md" },
+          triggeringEvidence: { type: "string", description: "Observed signal. MUST be non-empty." },
+          markdown: {
+            type: "string",
+            description:
+              "The FULL workflow spec in Markdown. Free-form structure; loop-me bar is the only " +
+              "hard requirement. Only wire connectors you are confident exist; if an integration's " +
+              "access is unclear, encode it as an explicit manual/human step — never assume it works.",
+          },
+          briefBullets: {
             type: "array",
-            items: {
-              type: "object",
-              properties: {
-                title: { type: "string" },
-                problem: { type: "string" },
-                triggeringEvidence: { type: "string", description: "Observed signal from context or interview. MUST be non-empty." },
-                trigger: { type: "string" },
-                steps: { type: "array", items: { type: "string" } },
-                effort: { type: "string", enum: ["S", "M", "L"] },
-              },
-              required: ["title", "problem", "triggeringEvidence", "trigger", "steps", "effort"],
-            },
+            items: { type: "string" },
+            description: "3–5 condensed, decision-ready step bullets for the Slack brief (loop-me Brief).",
+          },
+          triggerSummary: { type: "string", description: "One-line trigger summary for the brief, if any." },
+          checkpointSummary: {
+            type: "string",
+            description: "One-line checkpoint summary, or e.g. 'Autonomous — no checkpoint'.",
+          },
+          connectorsUsed: {
+            type: "array",
+            items: { type: "string" },
+            description: "Connectors this workflow touches (from context or explicit in spec).",
           },
         },
-        required: ["ideas"],
+        required: ["title", "slug", "triggeringEvidence", "markdown", "briefBullets", "connectorsUsed"],
       },
     },
   },
@@ -105,8 +117,13 @@ export const TOOLS: ChatTool[] = [
 function sectionRole(): string {
   return [
     "## Role",
-    "You are a workflow-ideas agent inside Slack.",
-    "Read the channel context, drill into specific pains with short grounded questions, then propose automations the team could actually build.",
+    "You are a workflow-spec agent inside Slack.",
+    "Read the channel context, drill into specific pains with short grounded questions, then generate ONE workflow spec the team could actually build.",
+    "",
+    "## Loop-me bar",
+    "A workflow spec is done when an implementer could build it without asking a single question.",
+    "Find delegatable loops in the user's work. Vocabulary (Trigger, Checkpoint, Push right, Brief) is guidance only —",
+    "mandate nothing structural. A workflow needs no AI, no checkpoint, and no schedule unless the grilling shows it does.",
   ].join("\n");
 }
 
@@ -114,11 +131,11 @@ function sectionConstraints(questionsAsked: number): string {
   return [
     "## Constraints",
     `- Question budget: ${questionsAsked}/${MAX_QUESTIONS} used. Never exceed ${MAX_QUESTIONS} ask_user calls.`,
-    "- One tool per turn: ask_user OR propose_ideas — never both, never plain text.",
+    "- One tool per turn: ask_user OR generate_workflow — never both, never plain text.",
     "- No generic questions (e.g. 'what does your team do?'). Every question must cite observed context or a prior answer.",
     "- Do not invent tools, teams, or facts absent from context or the user's replies.",
-    "- Every proposed idea MUST include non-empty triggeringEvidence from context or interview.",
-    "- Prefer ideas that use tools the team already mentions in context.",
+    "- Before generating: if a connector's access, ownership, or manual steps are unclear, ask about it. Don't assume an integration works.",
+    "- Prefer workflows that use tools and connectors the team already mentions in context.",
   ].join("\n");
 }
 
@@ -142,7 +159,7 @@ function sectionInterviewMethod(): string {
     "- Systems / connectors: when a pain implies a system interaction whose mechanism is still unknown — how a signal is noticed, or how an action reaches its target — ask that as your next grounded question and record what you learn in pain.connectors. Examples: \"Claude tokens running out\" → ask how they know; \"contact HR\" → ask Slack vs email vs form; \"deploy bot already posts to #releases\" → don't ask, record Slack.",
     `- Max ${MAX_PAINS} pains per session. Open pain #2 only after pain #1 is resolved or deadend.`,
     "- Mark pain.status resolved the moment understanding is shared; deadend if it turns out irrelevant.",
-    "- Call propose_ideas once at least one pain is resolved (or the question budget is nearly exhausted).",
+    "- Call generate_workflow once at least one pain is resolved (or the question budget is nearly exhausted).",
     "",
     "After each answer, judge it and set pain.lastAnswerQuality:",
     "- substantive — a real answer → drill the next aspect normally.",
@@ -152,9 +169,9 @@ function sectionInterviewMethod(): string {
     "  or mark the pain resolved if impact is already clear (friction or who filled).",
     "  Do NOT re-ask the same thing.",
     "",
-    "Before propose_ideas (normal path): mark at least one pain resolved with concrete friction",
+    "Before generate_workflow (normal path): mark at least one pain resolved with concrete friction",
     "or who. dont_know on some aspects is fine if impact is clear elsewhere. If nothing",
-    "substantive was learned, mark deadend — do not propose. Skip means the user wants ideas",
+    "substantive was learned, mark deadend — do not generate. Skip means the user wants a workflow",
     "anyway.",
   ].join("\n");
 }
@@ -163,6 +180,7 @@ function sectionObservedContext(context: ContextSummary): string {
   return [
     "## Observed context (from recent channel messages)",
     `Tools mentioned: ${context.tools.length ? context.tools.join(", ") : "(none detected)"}`,
+    `Connectors spotted: ${context.connectors.length ? context.connectors.join(", ") : "(none detected)"}`,
     `Channel summary: ${context.summary || "(none)"}`,
     `Pain points spotted: ${context.painPoints.length ? context.painPoints.join("; ") : "(none detected)"}`,
   ].join("\n");
@@ -204,23 +222,23 @@ function sectionToolChoice(context: ContextSummary, questionsAsked: number, pain
 
   let guidance: string;
   if (remaining <= 0) {
-    guidance = "Budget exhausted — call propose_ideas now using what you know.";
+    guidance = "Budget exhausted — call generate_workflow now using what you know.";
   } else if (!current) {
     guidance = context.painPoints.length
       ? "Call ask_user: ask which detected pain point relates to the user most, passing short quick_reply labels (≤75 chars). Don't pick for them."
       : "Call ask_user with one open grounded question to surface a pain (no pain points detected in context).";
   } else if (current.status === "deadend") {
     guidance = pains.length < MAX_PAINS
-      ? "Current pain is deadend — start a new pain or call propose_ideas."
-      : "Call propose_ideas.";
+      ? "Current pain is deadend — start a new pain or call generate_workflow."
+      : "Call generate_workflow.";
   } else if (current.status === "resolved") {
     guidance = pains.length < MAX_PAINS
-      ? "Current pain resolved — open pain #2 or call propose_ideas."
-      : "Call propose_ideas.";
+      ? "Current pain resolved — open pain #2 or call generate_workflow."
+      : "Call generate_workflow.";
   } else {
     guidance =
       `Keep grilling "${current.topic}": ask the next question that resolves what you still don't understand ` +
-      "(include your recommended answer). Mark it resolved once you share a clear understanding, then propose_ideas.";
+      "(include your recommended answer). Mark it resolved once you share a clear understanding, then generate_workflow.";
   }
 
   return ["## This turn", guidance].join("\n");

@@ -3,7 +3,7 @@
 // service จะเรียกผ่าน gateway นี้ ไม่แตะ WebClient ตรง ๆ
 
 import type { WebClient } from "@slack/web-api";
-import type { Idea } from "../../shared/types.js";
+import type { ConvState, WorkflowSpec } from "../../shared/types.js";
 import { log } from "../../shared/logger.js";
 
 const PAGE = 1000; // Slack max per page
@@ -128,7 +128,7 @@ export async function postQuestion(
   }));
   buttons.push({
     type: "button",
-    text: { type: "plain_text", text: "Skip — just give me ideas" },
+    text: { type: "plain_text", text: "Skip — generate workflow" },
     value: "__skip__",
     action_id: SKIP_ACTION,
   });
@@ -143,47 +143,91 @@ export async function postQuestion(
   });
 }
 
-export async function postIdeaCard(
+// ---- WRITE: in-place status (generate/refine progress) ----
+
+/** Post or update a single status message in the thread (UX-Q1 B). */
+export async function updateStatusInPlace(
+  client: WebClient,
+  state: ConvState,
+  text: string,
+): Promise<void> {
+  if (state.statusTs) {
+    await client.chat.update({ channel: state.channel, ts: state.statusTs, text });
+  } else {
+    const res = await client.chat.postMessage({
+      channel: state.channel,
+      thread_ts: state.threadTs,
+      text,
+    });
+    state.statusTs = res.ts as string;
+  }
+}
+
+/** Remove the status message when generate completes. */
+export async function clearStatusMessage(client: WebClient, state: ConvState): Promise<void> {
+  if (!state.statusTs) return;
+  await clearThinking(client, state.channel, state.statusTs);
+  state.statusTs = undefined;
+}
+
+// ---- WRITE: workflow brief + file ----
+
+export async function postBrief(
   client: WebClient,
   channel: string,
   threadTs: string,
-  idea: Idea,
+  spec: WorkflowSpec,
 ): Promise<void> {
-  const text =
-    `*💡 ${idea.title}*\n` +
-    `*Problem:* ${idea.problem}\n` +
-    `*Why you:* ${idea.triggeringEvidence}\n` +
-    `*Trigger:* ${idea.trigger}\n` +
-    `*Steps:* ${idea.steps.map((s) => `\n  • ${s}`).join("")}\n` +
-    `*Effort:* ${idea.effort}`;
+  const trigger = spec.triggerSummary?.trim() || "—";
+  const checkpoint = spec.checkpointSummary?.trim() || "—";
+  const connectors =
+    spec.connectorsUsed.length > 0 ? spec.connectorsUsed.join(", ") : "—";
+  const steps = spec.briefBullets.map((b) => `• ${b}`).join("\n");
 
   await client.chat.postMessage({
     channel,
     thread_ts: threadTs,
-    text: idea.title,
+    text: spec.title,
     blocks: [
-      { type: "section", text: { type: "mrkdwn", text } },
+      { type: "header", text: { type: "plain_text", text: spec.title } },
+      {
+        type: "context",
+        elements: [{ type: "mrkdwn", text: `Solves: ${spec.triggeringEvidence}` }],
+      },
+      {
+        type: "section",
+        fields: [
+          { type: "mrkdwn", text: `*Trigger*\n${trigger}` },
+          { type: "mrkdwn", text: `*Checkpoint*\n${checkpoint}` },
+          { type: "mrkdwn", text: `*Connectors*\n${connectors}` },
+        ],
+      },
+      { type: "section", text: { type: "mrkdwn", text: `*Steps*\n${steps}` } },
+      { type: "divider" },
       {
         type: "actions",
         elements: [
           {
             type: "button",
             style: "primary",
-            text: { type: "plain_text", text: "👍 Build this" },
-            value: idea.id,
-            action_id: "build_idea",
+            text: { type: "plain_text", text: "Accept" },
+            value: spec.id,
+            action_id: "accept_workflow",
           },
           {
             type: "button",
-            text: { type: "plain_text", text: "✏️ Refine" },
-            value: idea.id,
-            action_id: "refine_idea",
+            text: { type: "plain_text", text: "Refine" },
+            value: spec.id,
+            action_id: "refine_workflow",
           },
+        ],
+      },
+      {
+        type: "context",
+        elements: [
           {
-            type: "button",
-            text: { type: "plain_text", text: "👎 Not it" },
-            value: idea.id,
-            action_id: "reject_idea",
+            type: "mrkdwn",
+            text: `Download the attached \`${spec.slug}.md\` for the full spec.`,
           },
         ],
       },
@@ -191,21 +235,34 @@ export async function postIdeaCard(
   });
 }
 
-// ---- WRITE: real side effects (build) ----
-
-export async function createCanvas(
+export async function uploadWorkflowFile(
   client: WebClient,
-  title: string,
-  markdown: string,
-): Promise<string> {
-  // canvases API exists at runtime; Slack SDK types may lag behind manifest scopes
-  const res = await (
-    client as WebClient & {
-      canvases: { create: (args: unknown) => Promise<{ canvas_id?: string }> };
-    }
-  ).canvases.create({
-    title,
-    document_content: { type: "markdown", markdown },
-  });
-  return res.canvas_id ?? "created";
+  channel: string,
+  threadTs: string,
+  spec: WorkflowSpec,
+): Promise<void> {
+  const filename = `${slugify(spec.slug)}.md`;
+  const content = Buffer.from(spec.markdown, "utf8");
+  try {
+    await client.files.uploadV2({
+      channel_id: channel,
+      thread_ts: threadTs,
+      filename,
+      file: content,
+      title: spec.title,
+    });
+    log("slack.file.upload", { filename, thread: threadTs });
+  } catch (err) {
+    log("slack.file.upload.fail", { err: String(err), filename });
+    throw err;
+  }
+}
+
+function slugify(slug: string): string {
+  return slug
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "workflow";
 }

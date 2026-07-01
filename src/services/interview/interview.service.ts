@@ -1,16 +1,17 @@
 // Interview service — the re-entrant hybrid agent loop (OpenAI tool calling).
 //
 // runLoop() drives the agent until it SUSPENDS (called ask_user, needs a reply) or
-// FINISHES (called propose_ideas, posted cards). Called fresh on every inbound Slack
-// event; persisted state carries memory across events. Termination is a tool choice.
+// FINISHES (called generate_workflow, posts brief + file). Called fresh on every inbound
+// Slack event; persisted state carries memory across events. Termination is a tool choice.
 
 import type { WebClient } from "@slack/web-api";
 import { chat } from "../../gateways/llm/llm.gateway.js";
-import { clearThinking, postIdeaCard, postQuestion, postThinking, say } from "../../gateways/slack/slack.gateway.js";
+import { clearThinking, postQuestion, postThinking, say } from "../../gateways/slack/slack.gateway.js";
 import { saveState } from "../../repositories/state.repository.js";
 import { log, tid } from "../../shared/logger.js";
 import type { ChatMsg, ConvState } from "../../shared/types.js";
-import { validateIdeas } from "../ideas/ideas.service.js";
+import { runGenerate } from "../workflow/generate.service.js";
+import { SpecValidationError } from "../workflow/coerce-spec.js";
 import { validateAskUser } from "./ask-validation.js";
 import { autoDeadendIncompletePains, upsertPain } from "./pain.js";
 import { validateProposeGate } from "./propose-validation.js";
@@ -46,7 +47,7 @@ export async function runLoop(deps: AgentDeps, state: ConvState): Promise<void> 
     try {
       assistant = await chatRound(messages, TOOLS);
     } finally {
-      await clearThinking(client, state.channel, thinkingTs); // remove the loading message
+      await clearThinking(client, state.channel, thinkingTs);
     }
     state.history.push(assistant as ChatMsg);
 
@@ -57,7 +58,7 @@ export async function runLoop(deps: AgentDeps, state: ConvState): Promise<void> 
       state.history.push({
         role: "user",
         content:
-          "Invalid turn: use ask_user or propose_ideas only — no plain text. " +
+          "Invalid turn: use ask_user or generate_workflow only — no plain text. " +
           "Resend as the appropriate tool call.",
       });
       continue;
@@ -74,7 +75,7 @@ export async function runLoop(deps: AgentDeps, state: ConvState): Promise<void> 
 
       if (state.forceProposed) {
         log("loop.forceProposed", { thread: T });
-        state.history.push(toolResult(primary.id, "User wants ideas now. Call propose_ideas."));
+        state.history.push(toolResult(primary.id, "User wants a workflow now. Call generate_workflow."));
         for (const id of otherIds) state.history.push(toolResult(id, "skipped"));
         continue;
       }
@@ -82,7 +83,9 @@ export async function runLoop(deps: AgentDeps, state: ConvState): Promise<void> 
       if (state.questionsAsked >= MAX_QUESTIONS) {
         log("loop.ceiling", { thread: T, asked: state.questionsAsked });
         for (const t of toolCalls) {
-          state.history.push(toolResult(t.id, "Question budget exhausted. Call propose_ideas now using what you know."));
+          state.history.push(
+            toolResult(t.id, "Question budget exhausted. Call generate_workflow now using what you know."),
+          );
         }
         continue;
       }
@@ -110,43 +113,39 @@ export async function runLoop(deps: AgentDeps, state: ConvState): Promise<void> 
       return;
     }
 
-    if (primary.function.name === "propose_ideas") {
+    if (primary.function.name === "generate_workflow") {
       autoDeadendIncompletePains(state);
       const gate = validateProposeGate(state);
       if (!gate.ok) {
-        log("propose.gate.rejected", { thread: T, reason: gate.reason });
+        log("generate.gate.rejected", { thread: T, reason: gate.reason });
         state.history.push(toolResult(primary.id, gate.reason));
         for (const id of otherIds) state.history.push(toolResult(id, "skipped"));
         continue;
       }
-      const { valid, rejected } = validateIdeas(args.ideas ?? []);
-      log("propose.validate", { thread: T, valid: valid.length, rejected: rejected.length });
 
-      if (valid.length === 0) {
-        log("propose.retry", { thread: T, reasons: rejected.map((r) => r.reason) });
-        state.history.push(
-          toolResult(
-            primary.id,
-            "None of those passed validation. Reasons: " +
-              rejected.map((r) => r.reason).join("; ") +
-              ". Include every required field, at least one step, and a non-empty triggeringEvidence.",
-          ),
-        );
-        for (const id of otherIds) state.history.push(toolResult(id, "skipped"));
+      state.history.push(toolResult(primary.id, "Generating workflow spec…"));
+      for (const id of otherIds) state.history.push(toolResult(id, "skipped"));
+      saveState(state);
+
+      try {
+        await runGenerate(deps, state, args);
+      } catch (err) {
+        const reason =
+          err instanceof SpecValidationError
+            ? err.message
+            : "Generation failed — try again or refine your answers.";
+        log("generate.error", { thread: T, err: String(err) });
+        await say(client, state.channel, state.threadTs, `:warning: ${reason}`);
+        state.phase = "interview";
+        state.history.push({
+          role: "user",
+          content: `generate_workflow failed: ${reason}. Fix and call generate_workflow again.`,
+        });
+        saveState(state);
         continue;
       }
 
-      for (const idea of valid) {
-        state.proposedIdeas.push(idea);
-        await postIdeaCard(client, state.channel, state.threadTs, idea);
-      }
-      state.phase = "done";
-      state.pending = undefined;
-      state.history.push(toolResult(primary.id, `Posted ${valid.length} idea card(s); ${rejected.length} rejected.`));
-      for (const id of otherIds) state.history.push(toolResult(id, "skipped"));
-      saveState(state);
-      log("propose.posted", { thread: T, ideas: valid.map((idea) => idea.title) });
-      log("loop.done", { thread: T, reason: "ideas-posted" });
+      log("loop.done", { thread: T, reason: "workflow-generated" });
       return;
     }
 
