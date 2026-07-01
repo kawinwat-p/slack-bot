@@ -40,6 +40,7 @@ export async function summarizeContext(
       tools: [],
       summary: "No readable recent messages in this channel.",
       painPoints: [],
+      connectors: [],
     };
   }
 
@@ -56,16 +57,17 @@ export async function summarizeContext(
           "You are a precise analyst who distills Slack channel history into structured, evidence-grounded summaries. You never invent tools or facts that aren't in the chat.",
           "",
           "# Task",
-          "Read the recent messages and produce three things:",
+          "Read the recent messages and produce four things:",
           "1) tools — the tools/services/systems the company uses, exactly as named in the chat (e.g. GitHub, Jira, Datadog).",
           "2) summary — 2-4 sentences on what this channel is about and how the team works.",
           '3) painPoints — 3-6 concrete recurring frictions, quoting specifics (e.g. "deploys announced by hand", "daily \'why is staging down\' thread").',
+          "4) connectors — flat list of integration points a workflow might touch (APIs, webhooks, Slack channels, email, databases, etc.), as named or clearly implied in chat.",
           "",
           "# Context",
           "The input is the channel's recent messages, oldest first. Ground every item ONLY in what the chat actually says — if something isn't mentioned, leave it out. Do not infer tools, teams, or problems that aren't stated.",
           "",
           "# Format",
-          'Reply ONLY as JSON: {"tools": string[], "summary": string, "painPoints": string[]}. No prose, no markdown fences.',
+          'Reply ONLY as JSON: {"tools": string[], "summary": string, "painPoints": string[], "connectors": string[]}. No prose, no markdown fences.',
         ].join("\n"),
       },
       {
@@ -95,10 +97,12 @@ export async function summarizeContext(
     painPoints: Array.isArray(parsed.painPoints)
       ? parsed.painPoints.map(String)
       : [],
+    connectors: Array.isArray(parsed.connectors) ? parsed.connectors.map(String) : [],
   };
   log("context.summarize", {
     tools: result.tools.length,
     pains: result.painPoints.length,
+    connectors: result.connectors.length,
   });
   return result;
 }
